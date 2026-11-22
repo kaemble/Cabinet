@@ -1,4 +1,5 @@
 #include "home.h"
+#include "boxart.h"
 #include <cstdint>
 #include <cstddef>
 #include "cli_help.h"
@@ -39,7 +40,8 @@ enum class BrowsePurpose
     Locate,
     Core,
     Bios,
-    Archive
+    Archive,
+    BoxArt
 };
 struct Entry
 {
@@ -87,6 +89,10 @@ std::string format_playtime(std::int64_t seconds)
 
 const char* browser_folder_key(BrowsePurpose purpose)
 {
+    if (purpose == BrowsePurpose::BoxArt)
+    {
+        return "boxart";
+    }
     if (purpose == BrowsePurpose::Core)
     {
         return "core";
@@ -113,7 +119,7 @@ public:
     Home(SDL_Window* window, SDL_Renderer* renderer, const fs::path& data, std::string executable,
          HomeLogger logger = {})
         : window(window), renderer(renderer), text(renderer), grid_titles(renderer, TextRenderer::Font::Condensed),
-          library(data / "library.sqlite3"), process(logger), logger(logger), executable(std::move(executable)),
+          boxart(renderer, data), library(data / "library.sqlite3"), process(logger), logger(logger), executable(std::move(executable)),
           data_dir(data.string())
     {
         all = library.games();
@@ -143,7 +149,7 @@ public:
     {
         float width = 1200, height = 800, side = 248, left = 280, content = 888;
         float gap = 18, bar_height = 44, header_height = 60, toolbar_height = 44, grid_top = 140;
-        float card_height = 224, row_height = 49, system_height = 32, systems_top = 220;
+        float card_width = 224, card_height = 224, row_height = 49, system_height = 32, systems_top = 220;
         int body = 18, small = 16, heading = 32;
         int columns = 3, grid_rows = 2, list_rows = 8;
     } layout;
@@ -162,6 +168,7 @@ private:
     SDL_Renderer* renderer;
     TextRenderer text;
     TextRenderer grid_titles;
+    BoxArt boxart;
     Library library;
     GameProcess process;
     HomeLogger logger;
@@ -363,7 +370,7 @@ void Home::read_folder(const fs::path& path)
     remember_folder(purpose, path);
     listing = std::async(
         std::launch::async,
-        [path]
+        [path, images_only = purpose == BrowsePurpose::BoxArt]
         {
             Listing result;
             try
@@ -376,7 +383,7 @@ void Home::read_folder(const fs::path& path)
                 for (const auto& entry : fs::directory_iterator(path, fs::directory_options::skip_permission_denied))
                 {
                     std::error_code ec;
-                    if (entry.is_directory(ec) || entry.is_regular_file(ec))
+                    if (entry.is_directory(ec) || (entry.is_regular_file(ec) && (!images_only || boxart_image(entry.path()))))
                     {
                         result.entries.push_back({entry.path(), entry.is_directory(ec)});
                     }
@@ -463,6 +470,7 @@ void Home::import_file(const fs::path& path)
         throw std::runtime_error("Choose an existing game file.");
     }
     stop_text();
+    boxart.reset();
     draft = {};
     draft.path = fs::canonical(path).string();
     draft.title = path.stem().string();
@@ -547,6 +555,13 @@ void Home::choose_file(const fs::path& path)
     {
         import_file(path);
     }
+    else if (purpose == BrowsePurpose::BoxArt)
+    {
+        boxart.select(path);
+        dirty = true;
+        modal = Modal::Edit;
+        choice = 4;
+    }
     else if (purpose == BrowsePurpose::Core)
     {
         draft.core = fs::canonical(path).string();
@@ -586,6 +601,10 @@ void Home::finish_import()
         throw std::runtime_error("Saved game was not found in the library");
     }
     draft = *saved;
+    if (editing)
+    {
+        boxart.save(draft.save_id);
+    }
     cache_game(draft);
     sidebar = system_index(draft.system) + 3;
     query.clear();
@@ -612,6 +631,7 @@ void Home::edit_game()
         return;
     }
     draft = *game();
+    boxart.reset();
     editing = true;
     dirty = false;
     modal = Modal::Edit;
@@ -620,6 +640,7 @@ void Home::edit_game()
 void Home::close_editor()
 {
     stop_text();
+    boxart.reset();
     modal = editing ? Modal::Details : Modal::None;
     choice = 0;
 }
@@ -645,13 +666,18 @@ std::vector<std::string> Home::modal_rows()
     if (modal == Modal::Edit)
     {
         int sys = system_index(draft.system);
-        return {"Title: " + draft.title,
-                "System: " + ((sys < 0) ? std::string("Choose a system") : systems()[sys].name),
-                "Core: " +
-                    (draft.core.empty() ? std::string("Choose a core file") : fs::path(draft.core).filename().string()),
-                draft.favorite ? "Favorite: yes" : "Favorite: no",
-                editing ? "Save changes" : "Add to library",
-                "Cancel"};
+        std::vector<std::string> rows{"Title: " + draft.title,
+                                      "System: " + ((sys < 0) ? std::string("Choose a system") : systems()[sys].name),
+                                      "Core: " + (draft.core.empty() ? std::string("Choose a core file")
+                                                                     : fs::path(draft.core).filename().string()),
+                                      draft.favorite ? "Favorite: yes" : "Favorite: no"};
+        if (editing)
+        {
+            rows.push_back(boxart.pending() ? "Box art: new image selected" : "Box art: choose image");
+        }
+        rows.push_back(editing ? "Save changes" : "Add to library");
+        rows.push_back("Cancel");
+        return rows;
     }
     if (modal == Modal::Remove)
     {
@@ -807,11 +833,11 @@ void Home::back()
     }
     if (modal == Modal::Browse)
     {
-        modal = (purpose == BrowsePurpose::Bios)     ? Modal::Bios
-                : (purpose == BrowsePurpose::Core)   ? Modal::Edit
+        modal = (purpose == BrowsePurpose::Bios) ? Modal::Bios
+                : (purpose == BrowsePurpose::Core || purpose == BrowsePurpose::BoxArt) ? Modal::Edit
                 : (purpose == BrowsePurpose::Locate) ? Modal::Details
                                                      : Modal::None;
-        choice = 0;
+        choice = purpose == BrowsePurpose::BoxArt ? 4 : 0;
         return;
     }
     if (modal == Modal::Edit)
@@ -959,7 +985,11 @@ void Home::activate(bool with_controller)
             draft.favorite = !draft.favorite;
             dirty = true;
         }
-        else if (choice == 4)
+        else if (editing && choice == 4)
+        {
+            start_browse(BrowsePurpose::BoxArt);
+        }
+        else if (choice == (editing ? 5 : 4))
         {
             if (!editing && (draft.system == "psx" || draft.system == "saturn") &&
                 !has_bios(draft.system, fs::path(data_dir) / "system"))
@@ -1536,13 +1566,16 @@ void Home::update_layout()
     layout.header_height = std::max(48.0f, layout.heading * 1.25f);
     layout.toolbar_height = std::max(40.0f, layout.body * 2.4f);
     layout.grid_top = layout.gap * 3 + layout.header_height + layout.toolbar_height;
-    layout.card_height = std::max(224.0f, 190 * scale);
     layout.row_height = std::max(49.0f, layout.body * 2.8f);
     layout.system_height = layout.body * 1.9f;
     layout.systems_top = layout.gap * 4 + layout.body * 2 + 3 * (layout.system_height + 4);
     layout.columns =
         std::max(1, static_cast<int>((layout.content + layout.gap) / (std::max(240.0f, 190 * scale) + layout.gap)));
     const float available = layout.height - layout.bar_height - layout.grid_top - layout.gap;
+    const float caption_height = layout.gap + layout.body + std::max(12, layout.body * 2 / 3) + 4;
+    const float cell_width = (layout.content - (layout.columns - 1) * layout.gap) / layout.columns;
+    layout.card_width = std::min(cell_width, std::max(1.0f, available - caption_height));
+    layout.card_height = layout.card_width + caption_height;
     layout.grid_rows = std::max(1, static_cast<int>((available + layout.gap) / (layout.card_height + layout.gap)));
     layout.list_rows =
         std::max(1, static_cast<int>((available - layout.body + layout.gap) / (layout.row_height + layout.gap)));
@@ -1700,7 +1733,8 @@ void Home::draw()
     else
     {
         const int cols = list_view ? 1 : l.columns, rows = list_view ? l.list_rows : l.grid_rows;
-        const float card_width = (l.content - (cols - 1) * l.gap) / cols;
+        const float cell_width = (l.content - (cols - 1) * l.gap) / cols;
+        const float card_width = l.card_width;
         int row = selected / cols;
         if (row < first_row)
         {
@@ -1758,7 +1792,7 @@ void Home::draw()
             }
             else
             {
-                const float x = l.left + (i % cols) * (card_width + l.gap);
+                const float x = l.left + (i % cols) * (cell_width + l.gap);
                 const float y = l.grid_top + (i / cols - first_row) * (l.card_height + l.gap);
                 SDL_FRect rect{x, y, card_width, l.card_height};
                 if (active)
@@ -1769,8 +1803,12 @@ void Home::draw()
                 {
                     hits.push_back({rect, 1, i});
                 }
-                const float art = std::min(card_width - l.gap * 2, l.card_height - l.body * 2 - l.gap);
-                text.icon(x + (card_width - art) / 2, y + l.gap / 2, art, "placeholder");
+                const float art = card_width - l.gap * 2;
+                const SDL_FRect image{x + l.gap, y + l.gap, art, art};
+                if (!boxart.draw(g.save_id, image))
+                {
+                    text.icon(image.x, image.y, art, "placeholder");
+                }
                 grid_titles.draw(x + l.gap, y + l.card_height - l.gap - l.body - detail - 4, g.title, l.body, ink,
                                  card_width - l.gap * 2);
                 label(x + l.gap, y + l.card_height - l.gap - detail, status, detail, muted,
@@ -1885,16 +1923,18 @@ void Home::draw_modal()
 {
     hits.clear();
     const float available_height = layout.height - layout.bar_height - layout.gap * 2;
-    const float scale = std::min(layout.body / 16.0f, available_height / 540.0f);
+    const bool editing_details = modal == Modal::Edit && editing;
+    const float scale = std::min(layout.body / 16.0f, available_height / (editing_details ? 600.0f : 540.0f));
     const float dw = std::min(800.0f, (layout.width - layout.gap * 2) / scale);
-    const float dh = (modal == Modal::Browse) ? available_height / scale : std::min(590.0f, available_height / scale);
+    const float dh = (modal == Modal::Browse) ? available_height / scale
+                                             : std::min(editing_details ? 640.0f : 590.0f, available_height / scale);
     const float left = (layout.width - dw * scale) / 2;
     const float top = (layout.height - layout.bar_height - dh * scale) / 2;
     const float x = 24, inner = dw - 48;
-    auto line = [&](float y, const std::string& value, int size, SDL_Color color = ink)
+    auto line = [&](float y, const std::string& value, int size, SDL_Color color = ink, float max_width = 0)
     {
         label(left + x * scale, top + y * scale, value, std::max(14, static_cast<int>(size * scale)), color,
-              inner * scale);
+              (max_width > 0 ? max_width : inner) * scale);
     };
     auto button =
         [&](SDL_FRect rect, const std::string& value, bool active, int kind, int index, const std::string& icon = {})
@@ -1910,6 +1950,7 @@ void Home::draw_modal()
                         : (modal == Modal::Browse)
                             ? ((purpose == BrowsePurpose::Archive) ? "Choose a ROM inside the ZIP"
                                : (purpose == BrowsePurpose::Bios)  ? "Choose a BIOS file"
+                               : (purpose == BrowsePurpose::BoxArt) ? "Choose box art"
                                                                    : "Choose a file")
                         : (modal == Modal::Edit)    ? editing ? "Edit game details" : "Add to library"
                         : (modal == Modal::Remove)  ? "Remove this game?"
@@ -1920,6 +1961,10 @@ void Home::draw_modal()
     if (modal == Modal::Browse)
     {
         line(78, folder.string(), 13, muted);
+        if (purpose == BrowsePurpose::BoxArt)
+        {
+            line(104, "PNG, JPEG, or BMP. The image is copied when you save changes.", 13, muted);
+        }
         if (browsing)
         {
             line(128, (purpose == BrowsePurpose::Archive) ? "Reading ZIP..." : "Reading folder...", 16, muted);
@@ -1984,8 +2029,18 @@ void Home::draw_modal()
     }
     if (modal == Modal::Edit)
     {
-        line(78, draft.path + (draft.archive_member.empty() ? "" : " / " + draft.archive_member), 12, muted);
-        line(107, "Choose a system and core, then confirm to save.", 14, muted);
+        const float width = editing ? inner - 112 : inner;
+        line(78, draft.path + (draft.archive_member.empty() ? "" : " / " + draft.archive_member), 12, muted, width);
+        line(107, editing ? "Changes are applied when you save." : "Choose a system and core, then confirm to save.",
+             14, muted, width);
+        if (editing)
+        {
+            const SDL_FRect preview{left + (dw - 112) * scale, top + 74 * scale, 88 * scale, 110 * scale};
+            if (!boxart.draw(draft.save_id, preview, true))
+            {
+                text.icon(preview.x, preview.y + 11 * scale, 88 * scale, "placeholder");
+            }
+        }
     }
     if (modal == Modal::Remove)
     {

@@ -15,7 +15,7 @@ RUN rm -f /etc/apt/sources.list.d/debian.sources && \
         test "$TARGET_ARCH" = arm64 && apt-get install -y --no-install-recommends crossbuild-essential-arm64; \
     fi && \
     apt-get install -y --no-install-recommends \
-    libfreetype-dev:$TARGET_ARCH libarchive-dev:$TARGET_ARCH libsqlite3-dev:$TARGET_ARCH \
+    libfreetype-dev:$TARGET_ARCH libarchive-dev:$TARGET_ARCH libsqlite3-dev:$TARGET_ARCH libjpeg-dev:$TARGET_ARCH \
     libssl-dev:$TARGET_ARCH libvulkan-dev:$TARGET_ARCH libdrm-dev:$TARGET_ARCH \
     libgbm-dev:$TARGET_ARCH libegl-dev:$TARGET_ARCH libgl-dev:$TARGET_ARCH libglu1-mesa-dev:$TARGET_ARCH \
     libwayland-dev:$TARGET_ARCH libx11-dev:$TARGET_ARCH libxext-dev:$TARGET_ARCH \

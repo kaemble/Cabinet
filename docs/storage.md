@@ -5,6 +5,7 @@
 | Data | Default location |
 | --- | --- |
 | Library database | `~/.local/share/cabinet/library.sqlite3` |
+| Box art | `~/.local/share/cabinet/boxart/<game identity>.png` |
 | Firmware and system assets | `~/.local/share/cabinet/system/` |
 | Battery and core-managed saves | `~/.local/share/cabinet/saves/` |
 | Save states | `~/.local/share/cabinet/states/` |

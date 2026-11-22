@@ -53,7 +53,7 @@ int main(int argc, char** argv) {
             key(home, SDL_SCANCODE_UP); key(home, SDL_SCANCODE_RETURN);
             key(home, SDL_SCANCODE_RETURN); key(home, SDL_SCANCODE_A, SDL_KMOD_CTRL);
             type(home, "Renamed game"); key(home, SDL_SCANCODE_RETURN);
-            for (int i = 0; i < 4; ++i) key(home, SDL_SCANCODE_DOWN);
+            for (int i = 0; i < 5; ++i) key(home, SDL_SCANCODE_DOWN);
             key(home, SDL_SCANCODE_RETURN);
             require(inspect.games()[0].title == "Renamed game", "Edit details must save new title");
             home.draw();
@@ -191,7 +191,8 @@ int main(int argc, char** argv) {
                 require(home.layout.columns == (size.first == 1920 ? 5 : size.first == 1440 ? 4 : size.first <= 600 ? 1 : 3),
                     "Grid must change column count with available width");
                 if (size.first == 600) {
-                    require(home.layout.grid_rows >= 3, "Portrait grid must use the extra vertical space");
+                    require(home.layout.card_height > home.layout.card_width,
+                            "Grid cards must reserve space below the square artwork area");
                     auto* image = SDL_RenderReadPixels(renderer, nullptr);
                     require(image != nullptr, SDL_GetError());
                     SDL_SaveBMP(image, (dir / "portrait.bmp").string().c_str()); SDL_DestroySurface(image);
@@ -219,6 +220,7 @@ int main(int argc, char** argv) {
             require(seed.games()[6].favorite, "Resized list-view button and single-row navigation must work");
         }
         {
+            SDL_SetWindowSize(window, 1200, 800);
             const auto profile = dir / "cached-search";
             fs::create_directories(profile);
             Library seed(profile / "library.sqlite3");
@@ -264,7 +266,7 @@ int main(int argc, char** argv) {
             key(home, SDL_SCANCODE_DOWN); key(home, SDL_SCANCODE_RETURN);
             key(home, SDL_SCANCODE_RETURN); key(home, SDL_SCANCODE_A, SDL_KMOD_CTRL);
             type(home, "Zulu"); key(home, SDL_SCANCODE_RETURN);
-            for (int i = 0; i < 4; ++i) key(home, SDL_SCANCODE_DOWN);
+            for (int i = 0; i < 5; ++i) key(home, SDL_SCANCODE_DOWN);
             key(home, SDL_SCANCODE_RETURN);
             require(seed.game(games[0].id)->title == "Zulu", "Editing must update the selected cached entry");
             key(home, SDL_SCANCODE_ESCAPE); home.draw();
@@ -364,6 +366,56 @@ int main(int argc, char** argv) {
             key(home, SDL_SCANCODE_RETURN);
             require(inspect.games().size() == 1 && inspect.games()[0].id == id, "PSP reimport did not select the existing entry");
             fs::remove(disc);
+        }
+        {
+            const auto profile = dir / "boxart-profile";
+            const auto images = dir / "boxart-images";
+            fs::create_directories(images);
+            const auto source = images / "Cover.PNG";
+            auto* image = SDL_CreateSurface(24, 40, SDL_PIXELFORMAT_RGBA32);
+            require(image, SDL_GetError());
+            require(SDL_FillSurfaceRect(image, nullptr, SDL_MapSurfaceRGBA(image, 190, 30, 20, 255)), SDL_GetError());
+            require(SDL_SavePNG(image, source.c_str()), SDL_GetError());
+            SDL_DestroySurface(image);
+            std::ofstream(images / "not-an-image.txt") << "Ignore this file";
+            Library seed(profile / "library.sqlite3");
+            const auto id = seed.add({0, rom.string(), "Box-art fixture", "gb", bundled_core(systems()[system_index("gb")]).string()});
+            const auto game = *seed.game(id);
+            const auto owned = profile / "boxart" / (game.save_id + ".png");
+            save_storage::write(profile / "browser.conf", {{"boxart", images.string()}});
+            Home home(window, renderer, profile, "/unused");
+            home.select_system("gb");
+            key(home, SDL_SCANCODE_RIGHT); key(home, SDL_SCANCODE_RETURN);
+            auto select_image = [&]
+            {
+                key(home, SDL_SCANCODE_DOWN); key(home, SDL_SCANCODE_RETURN);
+                for (int i = 0; i < 4; ++i) key(home, SDL_SCANCODE_DOWN);
+                key(home, SDL_SCANCODE_RETURN);
+                for (int i = 0; i < 100; ++i) { home.tick(); SDL_Delay(1); }
+                key(home, SDL_SCANCODE_DOWN); key(home, SDL_SCANCODE_RETURN);
+                home.draw();
+            };
+            select_image();
+            auto* preview = SDL_RenderReadPixels(renderer, nullptr);
+            require(preview && SDL_SaveBMP(preview, (dir / "boxart-edit.bmp").c_str()), SDL_GetError());
+            SDL_DestroySurface(preview);
+            require(!fs::exists(owned), "Choosing box art saved an unconfirmed edit");
+            key(home, SDL_SCANCODE_ESCAPE); key(home, SDL_SCANCODE_DOWN); key(home, SDL_SCANCODE_RETURN);
+            require(!fs::exists(owned) && fs::exists(source), "Discarding box art changed stored or original files");
+            select_image();
+            fs::remove(source);
+            key(home, SDL_SCANCODE_DOWN); key(home, SDL_SCANCODE_RETURN);
+            require(fs::is_regular_file(owned), "Saving Edit Details did not copy box art into Cabinet data");
+            require(seed.game(id)->save_id == game.save_id && seed.game(id)->title == game.title,
+                    "Choosing box art changed the game's identity or metadata");
+            key(home, SDL_SCANCODE_ESCAPE); home.draw();
+            SDL_SetWindowSize(window, 640, 480);
+            key(home, SDL_SCANCODE_RETURN); key(home, SDL_SCANCODE_DOWN); key(home, SDL_SCANCODE_RETURN);
+            home.draw();
+            preview = SDL_RenderReadPixels(renderer, nullptr);
+            require(preview && SDL_SaveBMP(preview, (dir / "boxart-edit-small.bmp").c_str()), SDL_GetError());
+            SDL_DestroySurface(preview);
+            SDL_SetWindowSize(window, 1200, 800);
         }
         SDL_DestroyRenderer(renderer); SDL_DestroyWindow(window); SDL_Quit();
         std::cout << "Home import, edit, favorite, duplicate, and removal UI checks passed\n";
