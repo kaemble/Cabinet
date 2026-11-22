@@ -1,0 +1,48 @@
+{
+  "source": "https://github.com/libretro/libretro-core-info",
+  "commit": "eac3a2784d428444aa2bd472039b5c5540141af1",
+  "cores": {
+    "azahar": {
+      "savestate_features": "basic"
+    },
+    "blastem": {
+      "savestate_features": "serialized"
+    },
+    "bsnes": {
+      "savestate_features": "serialized"
+    },
+    "dolphin": {
+      "savestate_features": "basic"
+    },
+    "fceumm": {
+      "savestate_features": "deterministic"
+    },
+    "flycast": {
+      "savestate_features": "serialized"
+    },
+    "gambatte": {
+      "savestate_features": "deterministic"
+    },
+    "mednafen_pce": {
+      "savestate_features": "deterministic"
+    },
+    "mednafen_saturn": {
+      "savestate_features": "deterministic"
+    },
+    "melondsds": {
+      "savestate_features": "serialized"
+    },
+    "mgba": {
+      "savestate_features": "deterministic"
+    },
+    "mupen64plus_next": {
+      "savestate_features": "serialized"
+    },
+    "ppsspp": {
+      "savestate_features": "serialized"
+    },
+    "swanstation": {
+      "savestate_features": "basic"
+    }
+  }
+}

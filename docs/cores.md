@@ -67,6 +67,16 @@ Azahar's recipe writes upstream `GIT-COMMIT` and `GIT-TAG` metadata from the loc
 
 Flycast and Dolphin prefer Vulkan by default. Mupen64Plus-Next includes GLideN64/HLE and ParaLLEl-RDP/RSP; ParaLLEl-RDP needs an LLE RSP. See [video and performance](video.md) for runtime selection and settings.
 
+## Run-ahead
+
+Configuration → Advanced → Run-ahead offers off (the default), 1, 2, or 3 frames. The setting follows the current system or game configuration. Frontend run-ahead is available for Gambatte, mGBA, FCEUmm, Beetle PCE, and Beetle Saturn, which report `savestate_features = "deterministic"` in the pinned [Libretro core metadata](../third_party/core-info.json). Updating that snapshot changes eligibility without changing core build recipes.
+
+bsnes and SwanStation use the same menu entry as an alias for `bsnes_run_ahead_frames` and `swanstation_Main_RunaheadFrameCount`. Changes through More Core options stay synchronized; Cabinet does not add frontend run-ahead to either core.
+
+Frontend run-ahead retains one frame of progress, executes the requested extra frames with repeated input, presents only the final frame's output, and restores the retained state in memory. It is suspended during fast-forward. Ordinary startup frames are allowed before serialization becomes available. Hardware rendering and incomplete serialization disable frontend run-ahead. A failed snapshot disables the setting; an unrecoverable rollback stops the session without writing speculative battery RAM.
+
+Higher values require more CPU time and may cause stuttering when execution exceeds the frame budget. Run-ahead reduces emulated input delay; display and audio buffering still contribute latency.
+
 ## Installation and releases
 
 ```sh

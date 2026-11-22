@@ -97,6 +97,44 @@ static void run(const RunnerOptions& opts, const std::function<void()>& script) 
     if (runner_error) std::rethrow_exception(runner_error);
     require(result == 0, "Runner exited with an error");
 }
+static void runahead_settings(const fs::path& root, const std::string& core)
+{
+    const auto supported = root / "gambatte_libretro.so";
+    fs::create_symlink(fs::absolute(core), supported);
+    run(options(root, supported.string(), {"--no-audio"}), [&]
+    {
+        configuration(); down(3); enter(); down(2);
+        press(SDL_SCANCODE_RIGHT); press(SDL_SCANCODE_RIGHT);
+        back(); back(); back();
+        wait_for([&] { return core_read().loads > 0; }, "Run-ahead menu did not activate rollback");
+        quit_game();
+    });
+    RunnerOptions persisted;
+    persisted.data_dir = root.string();
+    settings_store::read_system("gc", persisted);
+    require(persisted.runahead_frames == 2, "Run-ahead did not persist in system settings");
+    const auto saved = core_read().saves;
+    run(options(root, core, {"--no-audio"}), [&]
+    {
+        frames(8);
+        require(core_read().saves == saved, "Unlisted core inherited active frontend run-ahead");
+        quit_game();
+    });
+    const auto loaded = core_read().loads;
+    run(options(root, supported.string(), {"--no-audio"}), [&]
+    {
+        wait_for([&] { return core_read().loads > loaded; }, "Relaunch lost the run-ahead setting");
+        configuration(); down(3); enter(); down(2);
+        press(SDL_SCANCODE_LEFT); press(SDL_SCANCODE_LEFT);
+        back(); back(); back();
+        frames();
+        quit_game();
+    });
+    persisted.runahead_frames = 3;
+    settings_store::read_system("gc", persisted);
+    require(persisted.runahead_frames == 0, "Turning off run-ahead did not persist");
+}
+
 static void idle_menu(const fs::path& root, const std::string& core) {
     auto opts = options(root, core, {"--no-audio"});
     opts.frames = 0; // Exercise the event-driven wait used in normal launches.
@@ -552,6 +590,7 @@ int main(int argc, char** argv) {
             require(armada_video_configurations == 1, "Dual-screen runner must configure Armada video once");
 #endif
         }
+        else if (test == "runahead") runahead_settings(directory.path, argv[1]);
         else if (test == "all_options") all_core_options(directory.path, argv[1]);
         else if (test == "contentless") contentless_core(directory.path, argv[1]);
         else if (test == "inheritance") inheritance(directory.path, argv[1]);

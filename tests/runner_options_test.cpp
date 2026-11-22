@@ -1,5 +1,6 @@
 #include "runner_options.h"
 #include "save_storage.h"
+#include "settings_store.h"
 #include <iostream>
 #include <stdexcept>
 #include <vector>
@@ -54,6 +55,7 @@ int main() {
             rejects({"--rom", "game.gbc", "--core", "core.so", "--playtime", value});
         require(parse({"--rom", "game.gbc", "--core", "core.so", "--scale", "integer"}).scaling == 3, "Integer scaling CLI ignored");
         auto defaults = parse({"--rom", "game.gbc", "--core", "core.so"});
+        require(defaults.runahead_frames == 0, "Run-ahead must default to off");
         require(defaults.scaling == 2, "Default scaling must be Sharp Bilinear");
         require(parse({"--rom", "game.sfc", "--core", "core.so", "--scale", "bilinear"}).scaling == 1, "Bilinear CLI ignored");
         rejects({"--rom", "game.sfc", "--core", "core.so", "--scale", "linear"});
@@ -147,6 +149,29 @@ int main() {
         rejects({"--rom", "game.gbc", "--core", "core.so", "--screenshot", "screen.bmp"});
         rejects({"--rom", "game.gbc", "--core", "core.so", "--state-dir", "states", "--state-file", "slot"});
         rejects({"--rom", "game.gbc", "--core", "core.so", "--unknown"});
+        for (int ahead = 0; ahead <= 3; ++ahead)
+        {
+            SettingsSnapshot snapshot;
+            snapshot.values.runahead_frames = ahead;
+            settings_store::write_system(profile / "config", "gb", snapshot);
+            RunnerOptions system;
+            system.data_dir = profile.string();
+            settings_store::read_system("gb", system);
+            require(system.runahead_frames == ahead, "System run-ahead setting did not roundtrip");
+            settings_store::write_game(profile / "game", snapshot);
+            RunnerOptions game;
+            settings_store::read_game(profile / "game/settings.conf", game);
+            require(game.runahead_frames == ahead, "Game run-ahead setting did not roundtrip");
+        }
+        for (const auto value : {"-1", "4", "999"})
+        {
+            std::ofstream invalid(profile / "game/settings.conf");
+            invalid << "runahead_frames " << value << '\n';
+            invalid.close();
+            RunnerOptions game;
+            settings_store::read_game(profile / "game/settings.conf", game);
+            require(game.runahead_frames == 0, "Invalid run-ahead value was accepted");
+        }
         std::filesystem::remove_all(test_home);
         std::cout << "Runner options and validation passed\n"; return 0;
     } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }

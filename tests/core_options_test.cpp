@@ -239,6 +239,34 @@ int main() {
         options.register_variables(legacy,ui);
         require(ui.all_core_options.size() == 1 && ui.all_core_options[0].name == "Legacy option" &&
             ui.all_core_options[0].values.size() == 2, "Legacy options not exposed");
+        for (const auto key_name : {"bsnes_run_ahead_frames", "swanstation_Main_RunaheadFrameCount"})
+        {
+            Frontend alias_ui;
+            CoreOptions alias_options;
+            const std::string off = std::string_view(key_name) == "bsnes_run_ahead_frames" ? "OFF" : "0";
+            const std::string choices = "Run-ahead; " + off + "|1|2|3|4";
+            retro_variable aliases[]{{key_name, choices.c_str()}, {nullptr, nullptr}};
+            alias_options.register_variables(aliases, alias_ui);
+            require(alias_ui.runahead_available && alias_ui.runahead_frames == 0 &&
+                        alias_ui.runahead_option_key == key_name, "Native run-ahead alias did not default to off");
+            alias_ui.page = Page::Advanced;
+            alias_ui.selected = 2;
+            key(alias_ui, SDL_SCANCODE_LEFT);
+            alias_options.sync_pending(alias_ui);
+            require(alias_ui.runahead_frames == 3 && alias_options.values.at(key_name) == "3" &&
+                        alias_options.take_update(), "Run-ahead alias did not update the native option");
+            require(alias_options.set_value({key_name, "2"}, alias_ui) && alias_ui.runahead_frames == 2,
+                    "Native option edit did not update the run-ahead alias");
+            require(!alias_options.set_value({key_name, "4"}, alias_ui), "Run-ahead exceeded three frames");
+            alias_options.restore_values({}, alias_ui);
+            require(alias_ui.runahead_frames == 0 && alias_options.values.at(key_name) == off,
+                    "Reset to inherited settings left run-ahead enabled");
+            alias_ui.cycle_runahead(1);
+            alias_options.sync_pending(alias_ui);
+            const auto persisted = alias_options.persistent_values(alias_ui);
+            require(std::find(persisted.begin(), persisted.end(), std::pair{std::string(key_name), std::string("1")}) != persisted.end(),
+                    "Run-ahead alias did not persist its native option");
+        }
         std::cout << "Core option definitions, navigation, synchronization, visibility and persistence passed\n";
         SDL_Quit(); return 0;
     } catch (const std::exception& e) { std::cerr << e.what() << '\n'; SDL_Quit(); return 1; }

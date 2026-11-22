@@ -124,6 +124,10 @@ void settings_store::read_system(const std::string& system, RunnerOptions& resul
             {
                 result.aspect_mode = value;
             }
+            if (key == "runahead_frames" && value >= 0 && value <= 3)
+            {
+                result.runahead_frames = value;
+            }
             if (key == "scaling" && value >= 0 && value <= 3 && !supplied.contains("--scale"))
             {
                 result.scaling = value;
@@ -183,6 +187,10 @@ void settings_store::read_game(const fs::path& file, RunnerOptions& options)
             {
                 options.aspect_mode = value;
             }
+            if (key == "runahead_frames" && value >= 0 && value <= 3)
+            {
+                options.runahead_frames = value;
+            }
             if (key == "wii_controller" && value >= 0 && value < wii_controller::count)
             {
                 options.wii_controller = value;
@@ -225,6 +233,7 @@ void settings_store::read_game(const fs::path& file, RunnerOptions& options)
 static void write_advanced_config(std::ostream& out, const SettingsSnapshot& snapshot)
 {
     out << "vsync " << snapshot.values.vsync << "\nvrr " << snapshot.values.vrr << '\n';
+    out << "runahead_frames " << snapshot.values.runahead_frames << '\n';
     for (const auto& [key, value] : snapshot.core_options)
     {
         out << "core_option " << std::quoted(key) << ' ' << std::quoted(value) << '\n';

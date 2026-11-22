@@ -10,6 +10,8 @@
 #include "vulkan_video.h"
 #include "save_storage.h"
 #include "save_manager.h"
+#include "runahead.h"
+#include <tuple>
 #include "runner_pacing.h"
 #include "audio_output.h"
 #include "libretro_core.h"
@@ -58,6 +60,12 @@ static void check(bool success)
 struct Session
 {
     LibretroCore core;
+    RunAhead runahead;
+    bool runahead_active = false, speculative = false, output_enabled = true;
+    std::uint64_t serialization_quirks = 0;
+    std::uint64_t runahead_input_frame = 0;
+    std::map<std::tuple<unsigned, unsigned, unsigned, unsigned>,
+             std::pair<std::uint64_t, std::int16_t>> runahead_input;
     SDL_Window* window = nullptr;
     SDL_Renderer* renderer = nullptr;
     SDL_Texture* texture = nullptr;
@@ -238,6 +246,10 @@ static bool core_rumble(unsigned port, retro_rumble_effect effect, std::uint16_t
     {
         return false;
     }
+    if (current->speculative || current->runahead.state_operation)
+    {
+        return true;
+    }
     return current->frontend.request_rumble(effect == RETRO_RUMBLE_STRONG, strength);
 }
 static void core_log(retro_log_level level, const char* fmt, ...)
@@ -263,8 +275,53 @@ static retro_proc_address_t hardware_proc(const char* name)
 }
 static bool environment(unsigned command, void* data)
 {
+    if (current->speculative || current->runahead.state_operation)
+    {
+        switch (command)
+        {
+        case RETRO_ENVIRONMENT_SET_VARIABLE:
+        case RETRO_ENVIRONMENT_SET_CORE_OPTIONS_DISPLAY:
+        case RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO:
+        case RETRO_ENVIRONMENT_SET_GEOMETRY:
+            return true;
+        case RETRO_ENVIRONMENT_GET_VARIABLE_UPDATE:
+            if (data)
+            {
+                *static_cast<bool*>(data) = false;
+            }
+            return true;
+        }
+    }
     switch (command)
     {
+    case RETRO_ENVIRONMENT_SET_SERIALIZATION_QUIRKS:
+    case RETRO_ENVIRONMENT_SET_SERIALIZATION_QUIRKS_2:
+        if (!data)
+        {
+            return false;
+        }
+        current->serialization_quirks = *static_cast<std::uint64_t*>(data);
+        return true;
+    case RETRO_ENVIRONMENT_GET_SAVESTATE_CONTEXT:
+        if (!data)
+        {
+            return false;
+        }
+        *static_cast<int*>(data) = current->runahead.state_operation
+                                      ? RETRO_SAVESTATE_CONTEXT_RUNAHEAD_SAME_INSTANCE
+                                      : RETRO_SAVESTATE_CONTEXT_NORMAL;
+        return true;
+    case RETRO_ENVIRONMENT_GET_AUDIO_VIDEO_ENABLE:
+        if (!data)
+        {
+            return false;
+        }
+        // Keep video callbacks for duplicate-frame fallback, without presenting
+        // intermediate images. Muted audio must still advance the core's DSP.
+        *static_cast<int*>(data) = RETRO_AV_ENABLE_VIDEO |
+                                  (current->output_enabled ? RETRO_AV_ENABLE_AUDIO : 0) |
+                                  (current->runahead.state_operation ? RETRO_AV_ENABLE_FAST_SAVESTATES : 0);
+        return true;
     case RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME:
         if (!data)
         {
@@ -552,7 +609,7 @@ static bool environment(unsigned command, void* data)
 
 static void video(const void* pixels, unsigned width, unsigned height, std::size_t pitch)
 {
-    if (!current->callback_error.empty())
+    if (!current->callback_error.empty() || current->runahead.state_operation)
     {
         return;
     }
@@ -711,11 +768,18 @@ static void video(const void* pixels, unsigned width, unsigned height, std::size
             return;
         }
     }
-    ++s.frames;
+    if (s.output_enabled)
+    {
+        ++s.frames;
+    }
 }
 
 static std::size_t audio_batch(const std::int16_t* samples, std::size_t frames)
 {
+    if (!current->output_enabled || current->runahead.state_operation)
+    {
+        return frames;
+    }
     try
     {
         return current->audio.submit(samples, frames, current->fast_forward);
@@ -744,6 +808,10 @@ static void audio_sample(std::int16_t left, std::int16_t right)
 }
 static void input_poll()
 {
+    if (current->speculative || current->runahead.state_operation)
+    {
+        return;
+    }
     current->input.begin_poll(current->frontend.input());
     current->pointer_sampled = false;
     current->input.update_screen_swap(current->core_options.values);
@@ -810,6 +878,13 @@ static void sample_pointer()
 
 static std::int16_t input_state(unsigned port, unsigned device, unsigned index, unsigned id)
 {
+    const auto key = std::tuple{port, device, index, id};
+    if (current->speculative || current->runahead.state_operation)
+    {
+        const auto found = current->runahead_input.find(key);
+        return found == current->runahead_input.end() || found->second.first != current->runahead_input_frame
+                   ? 0 : found->second.second;
+    }
     if (device == RETRO_DEVICE_POINTER && port == 0 && index == 0 && !current->pointer_sampled)
     {
         sample_pointer();
@@ -828,6 +903,10 @@ static std::int16_t input_state(unsigned port, unsigned device, unsigned index, 
         {
             value = static_cast<std::int16_t>(static_cast<std::uint16_t>(value) & ~(1u << swap));
         }
+    }
+    if (current->runahead_active)
+    {
+        current->runahead_input[key] = {current->runahead_input_frame, value};
     }
     return value;
 }
@@ -923,6 +1002,61 @@ static bool execute_action(Session& session, Action action)
     return true;
 }
 
+static void run_core_frame(Session& session, bool core_has_run)
+{
+    const bool compatible = session.frontend.runahead_option_key.empty() &&
+                            session.frontend.runahead_available && !session.hardware && !session.vulkan &&
+                            !(session.serialization_quirks & RETRO_SERIALIZATION_QUIRK_INCOMPLETE);
+    const unsigned ahead = compatible && !session.fast_forward && core_has_run
+                               ? session.frontend.runahead_frames : 0;
+    session.runahead_active = ahead != 0;
+    ++session.runahead_input_frame;
+    struct RestoreExecution
+    {
+        Session& session;
+        SDL_PixelFormat retained_format;
+        ~RestoreExecution()
+        {
+            session.format = retained_format;
+            session.speculative = false;
+            session.output_enabled = true;
+            session.runahead_active = false;
+        }
+    } restore_execution{session, session.format};
+    try
+    {
+        session.runahead.run(session.save_core(), ahead, [&](bool output, bool speculative)
+        {
+            session.output_enabled = output;
+            session.speculative = speculative;
+            if (speculative && session.frame_time.callback)
+            {
+                const auto duration = static_cast<retro_usec_t>(std::llround(1000000.0 / session.frame_rate));
+                session.frame_time.callback(session.frame_time.reference > 0 ? session.frame_time.reference : duration);
+            }
+            session.core.api.run();
+            if (!speculative)
+            {
+                restore_execution.retained_format = session.format;
+            }
+        });
+    }
+    catch (const StateRecoveryError&)
+    {
+        // Never persist speculative battery RAM after a failed rollback.
+        session.saves.battery_ready = false;
+        session.frontend.stop_rumble();
+        throw;
+    }
+    if (!session.runahead.error.empty())
+    {
+        session.frontend.notify(session.runahead.error);
+        std::cerr << "Cabinet: " << session.runahead.error << '\n';
+        session.frontend.runahead_frames = 0;
+        session.runahead.error.clear();
+    }
+}
+
 static SettingsSnapshot settings_snapshot(const Session& s)
 {
     SettingsSnapshot snapshot;
@@ -935,6 +1069,7 @@ static SettingsSnapshot settings_snapshot(const Session& s)
     values.scaling = ui.scaling;
     values.vsync = ui.vsync;
     values.vrr = ui.vrr;
+    values.runahead_frames = ui.runahead_option_key.empty() ? ui.runahead_frames : 0;
     values.swap_confirm_cancel = ui.swap_confirm_cancel;
     values.stick_shortcut = ui.stick_shortcut;
     values.home_shortcut = ui.home_shortcut;
@@ -999,6 +1134,7 @@ static int run_game_session(const RunnerOptions& inherited, const RunnerOptions&
     session.core.open(core_path.c_str());
     retro_system_info info{};
     session.core.api.get_system_info(&info);
+    session.frontend.runahead_available = deterministic_core(core_path);
     if (!contentless && !info.need_fullpath)
     {
         content = read_content(rom_path);
@@ -1098,6 +1234,7 @@ static int run_game_session(const RunnerOptions& inherited, const RunnerOptions&
     session.frontend.trigger_deadzone = options.trigger_deadzone;
     session.frontend.vsync = options.vsync;
     session.frontend.vrr = options.vrr;
+    session.frontend.runahead_frames = options.runahead_frames;
     session.frontend.swap_confirm_cancel = options.swap_confirm_cancel;
     try
     {
@@ -1359,6 +1496,11 @@ static int run_game_session(const RunnerOptions& inherited, const RunnerOptions&
     std::uint64_t cursor_visible_until = SDL_GetTicks() + 5000;
     bool menu_hint_pending = options.show_menu_hint && !options.home_shortcut && !options.stick_shortcut;
     bool load_pending = !options.load_state.empty();
+    if (session.frontend.runahead_option_key.empty() &&
+        (session.hardware || session.vulkan || (session.serialization_quirks & RETRO_SERIALIZATION_QUIRK_INCOMPLETE)))
+    {
+        session.frontend.runahead_available = false;
+    }
     session.frame_rate = av.timing.fps;
     RunnerDiagnostics diagnostics(options.timing_stats);
     pacing.update({session.frame_rate, session.frontend.vsync, session.frontend.vrr, session.fast_forward,
@@ -1527,6 +1669,7 @@ static int run_game_session(const RunnerOptions& inherited, const RunnerOptions&
                 ui.volume = base.volume;
                 ui.vsync = base.vsync;
                 ui.vrr = base.vrr;
+                ui.runahead_frames = base.runahead_frames;
                 session.core_options.restore_values(base.core_options, ui);
                 ui.bindings.configure(input_system, application_config(options.data_dir) / "input",
                                       base.wii_controller);
@@ -1551,6 +1694,8 @@ static int run_game_session(const RunnerOptions& inherited, const RunnerOptions&
                 restart->core_options = session.core_options.values;
                 restart->vsync = session.frontend.vsync;
                 restart->vrr = session.frontend.vrr;
+                restart->runahead_frames = session.frontend.runahead_option_key.empty()
+                                              ? session.frontend.runahead_frames : 0;
                 restart->fullscreen = session.frontend.fullscreen;
                 restart->volume = session.frontend.volume;
                 restart->scaling = session.frontend.scaling;
@@ -1676,7 +1821,7 @@ static int run_game_session(const RunnerOptions& inherited, const RunnerOptions&
                 const auto core_started =
                     diagnostics.begin_core(session.fast_forward, pacing.core_deadline(), pacing.core_period());
                 session.notify_frame_time(SDL_GetTicksNS());
-                session.core.api.run();
+                run_core_frame(session, core_has_run);
                 core_has_run = true;
                 diagnostics.end_core(core_started);
                 ++executed;

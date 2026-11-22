@@ -127,7 +127,26 @@ void CoreOptions::register_definitions(std::vector<Definition> definitions, Fron
         {
             continue;
         }
+        const bool runahead_alias = definition.key == "bsnes_run_ahead_frames" ||
+                                    definition.key == "swanstation_Main_RunaheadFrameCount";
+        if (runahead_alias)
+        {
+            for (std::size_t i = definition.values.size(); i-- > 0;)
+            {
+                const auto& value = definition.values[i];
+                if (value != "OFF" && value != "0" && value != "1" && value != "2" && value != "3")
+                {
+                    definition.values.erase(definition.values.begin() + i);
+                    definition.labels.erase(definition.labels.begin() + i);
+                }
+            }
+            if (definition.values.empty())
+            {
+                continue;
+            }
+        }
         auto& option = ui.all_core_options.emplace_back();
+        option.restart_required = !runahead_alias;
         option.key = std::move(definition.key);
         option.name = definition.name.empty() ? option.key : std::move(definition.name);
         option.description = std::move(definition.description);
@@ -345,6 +364,33 @@ void CoreOptions::project_values(Frontend& ui)
     {
         auto found = std::find(choice.values.begin(), choice.values.end(), values[choice.key]);
         choice.index = found == choice.values.end() ? 0 : found - choice.values.begin();
+    }
+    if (!ui.runahead_option_key.empty())
+    {
+        ui.runahead_available = false;
+    }
+    ui.runahead_option_key.clear();
+    for (const auto& option : ui.all_core_options)
+    {
+        if (option.key != "bsnes_run_ahead_frames" && option.key != "swanstation_Main_RunaheadFrameCount")
+        {
+            continue;
+        }
+        const std::string off = option.key == "bsnes_run_ahead_frames" ? "OFF" : "0";
+        const std::array<std::string, 4> candidates{off, "1", "2", "3"};
+        if (!std::all_of(candidates.begin(), candidates.end(), [&](const auto& value)
+                        {
+                            return std::find(option.values.begin(), option.values.end(), value) != option.values.end();
+                        }))
+        {
+            continue;
+        }
+        ui.runahead_option_key = option.key;
+        ui.runahead_values = candidates;
+        ui.runahead_available = true;
+        const auto found = std::find(candidates.begin(), candidates.end(), values[option.key]);
+        ui.runahead_frames = found == candidates.end() ? 0 : static_cast<int>(found - candidates.begin());
+        break;
     }
     refresh_mupen_resolution(ui);
     if (!resolution_key.empty())

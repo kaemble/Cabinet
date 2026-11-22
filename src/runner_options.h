@@ -29,6 +29,7 @@ struct RunnerOptions
     bool timing_stats = false, vsync = true, vrr = false;
     bool fast_forward = false;
     bool dual_screen = false; // Present the DS/3DS bottom screen in a separate window.
+    int runahead_frames = 0;
     int wii_controller = 0;
     int aspect_mode = aspect_ratio::Auto;
     int scaling = 2; // nearest, bilinear, Sharp Bilinear, integer

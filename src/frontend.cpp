@@ -728,6 +728,11 @@ std::vector<std::string> Frontend::rows() const
     {
         std::vector<std::string> result{std::string("VRR: ") + (vrr ? "on" : "off"),
                                         std::string("VSync: ") + (vsync ? "on" : "off")};
+        if (runahead_available)
+        {
+            result.push_back("Run-ahead: " + (runahead_frames == 0 ? std::string("off")
+                                             : std::to_string(runahead_frames) + (runahead_frames == 1 ? " frame" : " frames")));
+        }
         for (int index : visible_core_choices())
         {
             const auto& option = core_choices[index];
@@ -905,6 +910,16 @@ void Frontend::request_state(Action action)
         pending = action;
     }
 }
+void Frontend::cycle_runahead(int direction)
+{
+    runahead_frames = (runahead_frames + direction + 4) % 4;
+    if (!runahead_option_key.empty())
+    {
+        pending_core_option = std::pair{runahead_option_key, runahead_values[runahead_frames]};
+        mark_core_settings_changed();
+    }
+}
+
 void Frontend::back()
 {
     if (page == Page::CoreOptionValues)
@@ -916,7 +931,7 @@ void Frontend::back()
     else if (page == Page::CoreOptions)
     {
         page = Page::Advanced;
-        selected = 2 + visible_core_choices().size();
+        selected = 2 + static_cast<int>(runahead_available) + visible_core_choices().size();
         blocked = true;
     }
     else if (page == Page::Hotkeys)
@@ -1023,10 +1038,14 @@ void Frontend::adjust(int direction)
     {
         activate();
     }
+    else if (page == Page::Advanced && runahead_available && selected == 2)
+    {
+        cycle_runahead(direction);
+    }
     else if (page == Page::Advanced)
     {
         const auto choices = visible_core_choices();
-        const int row = selected - 2;
+        const int row = selected - 2 - static_cast<int>(runahead_available);
         if (row >= 0 && row < static_cast<int>(choices.size()))
         {
             cycle_core_choice(choices[row], direction);
@@ -1107,10 +1126,14 @@ void Frontend::activate()
         {
             vsync = !vsync;
         }
+        else if (runahead_available && selected == 2)
+        {
+            cycle_runahead(1);
+        }
         else
         {
             const auto choices = visible_core_choices();
-            const int row = selected - 2;
+            const int row = selected - 2 - static_cast<int>(runahead_available);
             if (row >= 0 && row < static_cast<int>(choices.size()))
             {
                 cycle_core_choice(choices[row], 1);
@@ -1625,10 +1648,14 @@ void Frontend::draw(SDL_Renderer* renderer, TextRenderer& font, int width, int h
             {
                 description = "Synchronize presentation to the display. Fast-forward temporarily overrides this.";
             }
+            else if (runahead_available && selected == 2)
+            {
+                description = "Reduce input latency by running ahead up to three frames. Requires more processing power.";
+            }
             else
             {
                 const auto choices = visible_core_choices();
-                const int row = selected - 2;
+                const int row = selected - 2 - static_cast<int>(runahead_available);
                 description = (row >= 0 && row < static_cast<int>(choices.size()))
                                   ? core_choices[choices[row]].description
                               : (row == static_cast<int>(choices.size())) ? "Browse all options provided by the core"

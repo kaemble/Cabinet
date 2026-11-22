@@ -125,6 +125,11 @@ public:
     }
     bool take_core_settings_changed();
     bool vsync = true, vrr = false;
+    bool runahead_available = false;
+    int runahead_frames = 0;
+    std::string runahead_option_key;
+    std::array<std::string, 4> runahead_values;
+    void cycle_runahead(int direction);
     std::string game_title = "Game";
     int volume = 80;
     int wii_controller = 0;
