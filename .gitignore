@@ -1,0 +1,26 @@
+/build/
+/cores/
+/roms/
+/references/
+/release/
+
+# Project/editor files
+*.swp
+.idea/
+.vs/
+.vscode/
+.cache/
+profile.json.gz
+CMakeLists.txt.user*
+
+# OS pollution
+.DS_Store
+.DS_Store?
+._*
+.AppleDouble
+.LSOverride
+.Spotlight-V100
+.Trashes
+Thumbs.db
+
+*__pycache__*

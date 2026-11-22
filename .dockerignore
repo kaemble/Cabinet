@@ -1,0 +1,8 @@
+/build/
+/cores/
+/roms/
+/references/
+/release/
+/sdl3-static/
+/.git/
+

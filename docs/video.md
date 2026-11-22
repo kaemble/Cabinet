@@ -1,0 +1,65 @@
+# Video and performance
+
+## Scaling and resolution
+
+**Configuration → Video** or `--scale MODE` selects scaling:
+
+| Mode | Behavior |
+| --- | --- |
+| `sharp-bilinear` (default) | Nearest-neighbor integer enlargement, then bilinear sampling to the final size; uses bilinear directly below 2x enlargement. |
+| `nearest` | Nearest-neighbor sampling. |
+| `bilinear` | Linear filtering. |
+| `integer` | Largest whole-number enlargement that fits, centered with borders; shrinks proportionally if the source is too large. |
+
+`--aspect-ratio auto|16:9|4:3|8:7|stretch` overrides the saved aspect setting. Auto uses the core's ratio, fixed ratios fit inside the window, and Stretch fills it. `--stretch` and `--keep-aspect` select Stretch and Auto. Integer scaling preserves source pixel shape and takes precedence over aspect ratio; high-DPI scaling uses drawable pixels.
+
+Internal resolution is available when advertised by the core and increases GPU load and memory use. Dolphin, Mupen64Plus-Next, Flycast, and melonDS DS require a confirmed restart to apply it. melonDS DS uses Software at 1x and OpenGL Compute above 1x. Resolution and other video settings follow [system/game configuration scope](controls.md#settings-scope).
+
+## Hardware rendering
+
+Software, OpenGL/OpenGL ES, and Vulkan cores are supported. `--opengl` and `--vulkan` select the preferred hardware API; if both appear, the last wins. Dolphin and Flycast default to Vulkan, while other cores prefer OpenGL Core. A core must implement the selected backend and may also require a renderer option. These flags do not select Home's renderer.
+
+For Mupen64Plus-Next, **Advanced** selects RDP/RSP plugins, GLideN64 threading, and texture filtering. GLideN64 is the default, with N64 3-point filtering. ParaLLEl-RDP selects an LLE RSP and has separate internal-resolution settings. Renderer changes require restart. To select Vulkan explicitly:
+
+```sh
+./build/cabinet-runner --rom /games/game.z64 \
+  --core ./build/cores/x86_64/mupen64plus_next_libretro.so --vulkan \
+  --core-option mupen64plus-rdp-plugin=parallel \
+  --core-option mupen64plus-rsp-plugin=parallel
+```
+
+Dolphin requires the system root containing `dolphin-emu/Sys`:
+
+```sh
+./build/cabinet-runner --rom /games/game.rvz \
+  --core ./build/cores/x86_64/dolphin_libretro.so --vulkan \
+  --system-dir ./build/cores/x86_64/system
+```
+
+Dolphin's **More Core options** includes Dual core and Immediately present XFB. Dual core requires restart and defaults on for aarch64 and off for x86; saved/explicit values override defaults. Immediate XFB applies on resume.
+
+GL/GLES frames remain on the GPU through a shared context and texture; the core context survives menus and window changes. Vulkan shares the negotiated device with SDL and snapshots core frames into runner-owned RGBA8 images, preserving paused frames and converting supported formats. Rotating fenced slots and queue synchronization protect image lifetimes. Screenshots can require readback. Vulkan output is SDR; HDR and device-loss recovery are not implemented. See [testing](testing.md) for graphics validation.
+
+## Frame pacing
+
+**Advanced → VSync / VRR** applies immediately and follows system/game scope. The runner keeps native emulation speed, matching close fixed-refresh rates within 0.5% (including integer multiples) with a small audio resampling adjustment. Other refresh rates use content-rate scheduling; slower displays present the latest image while bounded catch-up preserves game speed. Unknown refresh or unavailable VSync uses timer pacing.
+
+Audio starts with a small primed buffer. A media clock handles cores producing several video intervals per call, while bounded resampling feedback stabilizes the queue. Pause/resume resets timing and primes audio. Fast-forward disables pacing and VSync and mutes playback without changing saved preferences.
+
+`--no-vsync` requests timer pacing. `--vrr` uses content-rate presentation with VSync and assumes VRR is already enabled in the display/driver/compositor; it does not enable or verify hardware VRR.
+
+## Diagnostics and benchmarks
+
+`--timing-stats` prints five-second and final summaries covering core/present CPU time, presentation interval variation, late deadlines, repeated frames, and audio queue feedback. The configuration line shows the accepted swap interval, target rate, and core-clock pacing. `idle_presents` counts presents without a core call; `catchup_presents` counts those with multiple calls. Empty software queues do not establish hardware audio underruns, and SDL submission timing does not measure physical scanout.
+
+For throughput comparisons, use the same ROM, scene, internal resolution, and window size:
+
+```sh
+./build/cabinet-runner --rom /games/game.rvz \
+  --core ./build/cores/x86_64/dolphin_libretro.so \
+  --fast-forward --timing-stats --windowed --window-size 1280x720 --opengl
+```
+
+Repeat with `--vulkan`. Reports include `elapsed_s`, `runs_per_s` (core calls), `video_fps` (new frames), and the negotiated `video_api`. Core calls may cover multiple video intervals, so call rate is not necessarily game frame rate. `--load-state FILE` resets timing counters after loading; `--frames` still counts display loops from startup.
+
+**Interface → Show stats** displays new video frames per second, average presentation interval, and core idle percentage. Idle measures time outside synchronous `retro_run()` calls, excluding asynchronous worker activity; it is not total CPU utilization. Measurements pause in menus and restart on resume.

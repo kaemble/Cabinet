@@ -1,0 +1,8 @@
+execute_process(
+  COMMAND "@Python3_EXECUTABLE@" "@CMAKE_CURRENT_SOURCE_DIR@/tools/build_cores.py"
+    --verify --arch "@CABINET_CORE_ARCH@" --lock "@CMAKE_CURRENT_SOURCE_DIR@/cores.lock.json"
+    --output "@CABINET_LOCKED_CORES_DIR@"
+  RESULT_VARIABLE result)
+if(NOT result EQUAL 0)
+  message(FATAL_ERROR "Build the locked core bundle for @CABINET_CORE_ARCH@ before installing Cabinet. See docs/cores.md.")
+endif()
