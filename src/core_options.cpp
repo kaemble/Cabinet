@@ -171,6 +171,10 @@ void CoreOptions::register_definitions(std::vector<Definition> definitions, Fron
         {
             default_value = "disabled";
         }
+        if (key == "citra_analog_function")
+        {
+            default_value = "c_stick";
+        }
         if (key == "melonds_touch_mode")
         {
             default_value = "touch";
