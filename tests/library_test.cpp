@@ -89,10 +89,23 @@ int main(int argc, char** argv) {
             require(identify_systems("GAME.GBC") == std::vector<int>{system_index("gb")}, "System detection must ignore extension case");
             for (const auto& [filename, system] : {std::pair{"game.cso", "psp"}, {"GAME.CSO", "psp"}, {"game.chd", "psp"},
                     {"game.unif", "nes"}, {"game.unf", "nes"}, {"game.wia", "gc"}, {"game.gcz", "gc"},
-                    {"game.wia", "wii"}, {"game.mds", "saturn"}, {"game.img", "psx"}, {"game.fig", "snes"}, {"game.dmg", "gb"}}) {
+                    {"game.wia", "wii"}, {"game.toc", "saturn"}, {"game.img", "psx"}, {"game.bs", "snes"}, {"game.dmg", "gb"}}) {
                 const auto candidates = identify_systems(filename);
                 require(std::find(candidates.begin(), candidates.end(), system_index(system)) != candidates.end(),
                         "Core-supported game format missing from Home catalog");
+            }
+            for (const auto system : {"md", "sms", "gg"})
+            {
+                require(systems()[system_index(system)].core == "blastem", "Sega cartridges must default to BlastEm");
+            }
+            require(systems()[system_index("snes")].core == "bsnes", "SNES must default to bsnes");
+            require(systems()[system_index("saturn")].core == "mednafen_saturn", "Saturn must default to Beetle Saturn");
+            for (const auto& [filename, system] : {std::pair{"game.mds", "saturn"}, {"game.iso", "saturn"},
+                                                 {"game.fig", "snes"}, {"game.swc", "snes"}, {"game.st", "snes"}})
+            {
+                const auto candidates = identify_systems(filename);
+                require(std::find(candidates.begin(), candidates.end(), system_index(system)) == candidates.end(),
+                        "Unsupported game format advertised for the default core");
             }
             require(identify_systems("disc.iso").size() > 1, "Ambiguous extensions must offer manual assignment");
             require(identify_systems("unknown.xyz").empty(), "Unknown formats must not be silently assigned");

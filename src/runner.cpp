@@ -1135,9 +1135,9 @@ static int run_game_session(const RunnerOptions& inherited, const RunnerOptions&
             session.core_options.values["dolphin_ir_offset"] = "15";
         }
     }
-    if (input_system == "md" && info.library_name && std::string_view(info.library_name) == "PicoDrive")
+    if (input_system == "md" && info.library_name && std::string_view(info.library_name) == "BlastEm")
     {
-        session.core_options.values.try_emplace("picodrive_input1", "6 button pad");
+        session.core_options.values.try_emplace("blastem_io_1", "gamepad6.1");
     }
     session.prefer_vulkan = options.prefers_vulkan(info.library_name ? info.library_name : "");
     session.core.api.set_environment(environment);

@@ -204,6 +204,23 @@ int main(int argc,char** argv) {
                 }
             }
         }
+        for (const auto system : {"gg", "sms"})
+        {
+            input.configure(system, {});
+            require(input.rows()[row(input, "1")].target == RETRO_DEVICE_ID_JOYPAD_A &&
+                        input.rows()[row(input, "2")].target == RETRO_DEVICE_ID_JOYPAD_R,
+                    "BlastEm two-button mapping incorrect");
+        }
+        input.configure("md", {});
+        for (const auto& [label, target] : {std::pair{"A", RETRO_DEVICE_ID_JOYPAD_B},
+                                          {"B", RETRO_DEVICE_ID_JOYPAD_A}, {"C", RETRO_DEVICE_ID_JOYPAD_R},
+                                          {"X", RETRO_DEVICE_ID_JOYPAD_Y}, {"Y", RETRO_DEVICE_ID_JOYPAD_X},
+                                          {"Z", RETRO_DEVICE_ID_JOYPAD_L}})
+        {
+            require(input.rows()[row(input, label)].target == target, "BlastEm six-button mapping incorrect");
+        }
+        require(InputBindings::identify("game.bin", "/cores/blastem_libretro.so") == "md",
+                "BlastEm shared extension inference failed");
         input.configure("3ds",{});
         require(InputBindings::identify("game.3ds","custom.so") == "3ds" &&
             InputBindings::identify("game.elf","azahar_libretro.so") == "3ds", "Nintendo 3DS inference failed");
@@ -226,11 +243,15 @@ int main(int argc,char** argv) {
         require(value.pressure[12]>0 && value.pressure[12]<32767 && value.axes[0]>0 && !value.buttons[7],
             "Dreamcast analog stick/trigger range incorrect");
         axis(SDL_GAMEPAD_AXIS_LEFT_TRIGGER,0); axis(SDL_GAMEPAD_AXIS_LEFTX,0);
+        require(InputBindings::identify("game.cue", "/cores/mednafen_saturn_libretro.so") == "saturn",
+                "Beetle Saturn core inference failed");
+        require(InputBindings::identify("game.bs", "/cores/bsnes_libretro.so") == "snes",
+                "bsnes core inference failed");
         require(InputBindings::identify("game.GDI","custom.so")=="dc", "Dreamcast extension inference failed");
         require(InputBindings::identify("game.cue","/cores/flycast_libretro.so")=="dc", "Dreamcast shared extension inference failed");
         require(InputBindings::identify("game.GBA","/cores/mgba_libretro.so")=="gba","GBA inference failed");
         require(InputBindings::identify("game.iso","/cores/ppsspp_libretro.so")=="psp","Ambiguous extension did not use core");
-        require(InputBindings::identify("game.GG","/cores/picodrive_libretro.so")=="gg","Shared core lost system");
+        require(InputBindings::identify("game.GG","/cores/blastem_libretro.so")=="gg","Shared core lost system");
         {
             InputBindings multi; multi.configure("gba", dir / "multiple");
             const auto action = row(multi, "A");

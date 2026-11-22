@@ -65,7 +65,7 @@ int main(int argc, char** argv) {
         Game sega{0, sega_zip.string(), member, system, bundled_core(systems()[system_index(system)]).string()};
         sega.archive_member = member;
         sega.id = library.add(sega);
-        require(sega.id > 0, "PicoDrive ZIP cartridge was not imported");
+        require(sega.id > 0, "BlastEm ZIP cartridge was not imported");
         library.update(sega);
     }
     rejects([&]{rom_archive::validate_core(bundled_core(systems()[system_index("md")]), dir / "core-info", "psp");});

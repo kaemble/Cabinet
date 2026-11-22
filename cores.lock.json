@@ -106,22 +106,23 @@
         }
       }
     },
-    "snes9x": {
-      "repository": "https://github.com/libretro/snes9x.git",
-      "commit": "fae2fea08f74180759ef540ee94259213f503480",
-      "source": "https://codeload.github.com/libretro/snes9x/tar.gz/fae2fea08f74180759ef540ee94259213f503480",
-      "sha256": "0d4b0c4181d66668ec0040eb17f90a559f7b7fa6cbd9198593c3bdbe79acd029",
-      "source_directory": "snes9x-fae2fea08f74180759ef540ee94259213f503480",
-      "version": "git-fae2fea08f74",
-      "license": "LicenseRef-Snes9x",
+    "bsnes": {
+      "repository": "https://github.com/libretro/bsnes.git",
+      "commit": "63ee22f7af8f5d1ada295c2c98fd7bf261fa62a7",
+      "source": "https://codeload.github.com/libretro/bsnes/tar.gz/63ee22f7af8f5d1ada295c2c98fd7bf261fa62a7",
+      "sha256": "63ceded7a53e8bc5d9088f503330a79c5740b83525ffebabd6c3e2ec174b7c8b",
+      "source_directory": "bsnes-63ee22f7af8f5d1ada295c2c98fd7bf261fa62a7",
+      "version": "git-63ee22f7af8f",
+      "license": "GPL-3.0-only",
       "license_files": [
-        "LICENSE"
+        "LICENSE.txt",
+        "GPLv3.txt"
       ],
       "build_system": "make",
-      "build_directory": "libretro",
+      "build_directory": ".",
       "makefile": "Makefile",
-      "target": "snes9x_libretro.so",
-      "artifact": "snes9x_libretro.so",
+      "target": "bsnes_libretro.so",
+      "artifact": "bsnes_libretro.so",
       "make": {
         "DEBUG": "0"
       },
@@ -331,22 +332,50 @@
         }
       }
     },
-    "picodrive": {
-      "repository": "https://github.com/libretro/picodrive.git",
-      "commit": "1890c2932234c9d30f4cd3851d02228baae8f09e",
-      "source": "https://codeload.github.com/libretro/picodrive/tar.gz/1890c2932234c9d30f4cd3851d02228baae8f09e",
-      "sha256": "123871ce468bc31f824df9273415215527ded2bdaadffd0503a97149aa06d523",
-      "source_directory": "picodrive-1890c2932234c9d30f4cd3851d02228baae8f09e",
-      "version": "git-1890c2932234",
-      "license": "LicenseRef-PicoDrive",
+    "blastem": {
+      "repository": "https://github.com/libretro/blastem.git",
+      "commit": "aa11275a99b3ea0ee477fed2844bb7d9f9faf3f6",
+      "source": "https://codeload.github.com/libretro/blastem/tar.gz/aa11275a99b3ea0ee477fed2844bb7d9f9faf3f6",
+      "sha256": "5c4ad50650fabc8c0518d4aada04fa0361457a6b5f0c4930bff5bfd160c80bad",
+      "source_directory": "blastem-aa11275a99b3ea0ee477fed2844bb7d9f9faf3f6",
+      "version": "git-aa11275a99b3",
+      "license": "GPL-3.0-or-later",
       "license_files": [
         "COPYING"
       ],
       "build_system": "make",
       "build_directory": ".",
       "makefile": "Makefile.libretro",
-      "target": "picodrive_libretro.so",
-      "artifact": "picodrive_libretro.so",
+      "target": "core",
+      "artifact": "blastem_libretro.so",
+      "make": {},
+      "architectures": {
+        "x86_64": {
+          "platform": "unix",
+          "ARCH": "x86_64"
+        },
+        "aarch64": {
+          "platform": "unix",
+          "ARCH": "aarch64"
+        }
+      }
+    },
+    "mednafen_saturn": {
+      "repository": "https://github.com/libretro/beetle-saturn-libretro.git",
+      "commit": "7126d65b83b65b4316736434ecca2f5ff4f1a3dd",
+      "source": "https://codeload.github.com/libretro/beetle-saturn-libretro/tar.gz/7126d65b83b65b4316736434ecca2f5ff4f1a3dd",
+      "sha256": "22237f731b1ac67b830c918f70eb1f0560dd20740730edfa842713f150cfabea",
+      "source_directory": "beetle-saturn-libretro-7126d65b83b65b4316736434ecca2f5ff4f1a3dd",
+      "version": "git-7126d65b83b6",
+      "license": "GPL-2.0-or-later",
+      "license_files": [
+        "COPYING"
+      ],
+      "build_system": "make",
+      "build_directory": ".",
+      "makefile": "Makefile",
+      "target": "mednafen_saturn_libretro.so",
+      "artifact": "mednafen_saturn_libretro.so",
       "make": {
         "DEBUG": "0"
       },
@@ -356,85 +385,10 @@
           "ARCH": "x86_64"
         },
         "aarch64": {
-          "platform": "aarch64",
+          "platform": "unix",
           "ARCH": "aarch64"
         }
-      },
-      "submodules": [
-        {
-          "path": "platform/libpicofe",
-          "repository": "https://github.com/irixxxx/libpicofe.git",
-          "commit": "9ed5822606dd7ff20a782a882e8fd611cb53ba88",
-          "source": "https://codeload.github.com/irixxxx/libpicofe/tar.gz/9ed5822606dd7ff20a782a882e8fd611cb53ba88",
-          "sha256": "458519aaa70916528e593f1f052aa45f704670fba094b409478a8197e6f076a7",
-          "source_directory": "libpicofe-9ed5822606dd7ff20a782a882e8fd611cb53ba88"
-        },
-        {
-          "path": "cpu/cyclone",
-          "repository": "https://github.com/irixxxx/cyclone68000.git",
-          "commit": "3ac7cf1bdeecb60e2414980e8dc72ff092f69769",
-          "source": "https://codeload.github.com/irixxxx/cyclone68000/tar.gz/3ac7cf1bdeecb60e2414980e8dc72ff092f69769",
-          "sha256": "e570e121721441c1bf8015a8bce8614b73954e2344b983b3650e591952f74a6c",
-          "source_directory": "cyclone68000-3ac7cf1bdeecb60e2414980e8dc72ff092f69769"
-        },
-        {
-          "path": "pico/sound/emu2413",
-          "repository": "https://github.com/digital-sound-antiques/emu2413.git",
-          "commit": "a2dfc20ff507e4fd075cd325620bcea655e2c1f7",
-          "source": "https://codeload.github.com/digital-sound-antiques/emu2413/tar.gz/a2dfc20ff507e4fd075cd325620bcea655e2c1f7",
-          "sha256": "bd816079cfbf13c56a260c095d6b8e260c2f877e5b13f50d4e570b96e8b92830",
-          "source_directory": "emu2413-a2dfc20ff507e4fd075cd325620bcea655e2c1f7"
-        },
-        {
-          "path": "pico/cd/libchdr",
-          "repository": "https://github.com/irixxxx/libchdr.git",
-          "commit": "e62ac5995b1c7ef65ece35293914843b8ee57d49",
-          "source": "https://codeload.github.com/irixxxx/libchdr/tar.gz/e62ac5995b1c7ef65ece35293914843b8ee57d49",
-          "sha256": "59b99005d3d6317a0d1e45e1c4abf0e551070dbf32c8fdc66ed5b4ae6d8ea702",
-          "source_directory": "libchdr-e62ac5995b1c7ef65ece35293914843b8ee57d49"
-        },
-        {
-          "path": "platform/common/dr_libs",
-          "repository": "https://github.com/mackron/dr_libs.git",
-          "commit": "dd762b861ecadf5ddd5fb03e9ca1db6707b54fbb",
-          "source": "https://codeload.github.com/mackron/dr_libs/tar.gz/dd762b861ecadf5ddd5fb03e9ca1db6707b54fbb",
-          "sha256": "8f0be8a4aa27cd4ddaba41acbb845b1641964f2cc2f5a5f7b4b72f73368c1c12",
-          "source_directory": "dr_libs-dd762b861ecadf5ddd5fb03e9ca1db6707b54fbb"
-        }
-      ]
-    },
-    "kronos": {
-      "repository": "https://github.com/libretro/yabause.git",
-      "commit": "3791ffb2221fda61d70aec5cca376418caf05669",
-      "source": "https://codeload.github.com/libretro/yabause/tar.gz/3791ffb2221fda61d70aec5cca376418caf05669",
-      "sha256": "5ca2dcf9c33ea37eaebd668e0a3f08a616dfba5b5dac2a5cb3a92c1ea362b971",
-      "source_directory": "yabause-3791ffb2221fda61d70aec5cca376418caf05669",
-      "version": "git-3791ffb2221f",
-      "license": "GPL-2.0-or-later",
-      "license_files": [
-        "yabause/COPYING"
-      ],
-      "build_system": "make",
-      "build_directory": "yabause/src/libretro",
-      "makefile": "Makefile",
-      "target": "kronos_libretro.so",
-      "artifact": "kronos_libretro.so",
-      "make": {
-        "DEBUG": "0"
-      },
-      "architectures": {
-        "x86_64": {
-          "platform": "unix",
-          "HAVE_SSE": "1"
-        },
-        "aarch64": {
-          "platform": "unix",
-          "HAVE_SSE": "0"
-        }
-      },
-      "prepare_targets": [
-        "generate-files"
-      ]
+      }
     },
     "flycast": {
       "repository": "https://github.com/flyinghead/flycast.git",

@@ -252,8 +252,7 @@ void validate_core(const fs::path& core, const fs::path& cache, std::string_view
             continue;
         }
         bundled = true;
-        // The catalog lists only single-file cartridges for PicoDrive's systems.
-        if (system.memory_content || (system.core == "picodrive" && system.id == system_id))
+        if (system.memory_content && system.id == system_id)
         {
             return;
         }
@@ -306,7 +305,7 @@ void validate_core(const fs::path& core, const fs::path& cache, std::string_view
         // reference tracks that are not part of the selected ZIP member.
         for (const auto& system : systems())
         {
-            if (system.id == system_id && (system.memory_content || system.core == "picodrive"))
+            if (system.id == system_id && system.memory_content)
             {
                 return;
             }

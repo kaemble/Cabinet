@@ -100,10 +100,10 @@ std::string InputBindings::identify(const std::string& rom, const std::string& c
     }
     auto name = lower(std::filesystem::path(core).stem().string());
     const std::vector<std::pair<std::string, std::string>> cores{
-        {"flycast", "dc"},    {"gambatte", "gb"},     {"mgba", "gba"},   {"dolphin", "gc"},
-        {"picodrive", "md"},  {"fceumm", "nes"},      {"azahar", "3ds"}, {"mupen64plus_next", "n64"},
-        {"melondsds", "nds"}, {"kronos", "saturn"},   {"ppsspp", "psp"}, {"swanstation", "psx"},
-        {"snes9x", "snes"},   {"mednafen_pce", "pce"}};
+        {"flycast", "dc"},    {"gambatte", "gb"},            {"mgba", "gba"},   {"dolphin", "gc"},
+        {"blastem", "md"},    {"fceumm", "nes"},             {"azahar", "3ds"}, {"mupen64plus_next", "n64"},
+        {"melondsds", "nds"}, {"mednafen_saturn", "saturn"}, {"ppsspp", "psp"}, {"swanstation", "psx"},
+        {"bsnes", "snes"},    {"mednafen_pce", "pce"}};
     for (const auto& [prefix, id] : cores)
     {
         if (name == prefix + "_libretro")
@@ -185,37 +185,35 @@ void InputBindings::configure(const std::string& system, const std::filesystem::
     else if (id == "md" || id == "saturn")
     {
         const bool md = id == "md";
-        add(md ? RETRO_DEVICE_ID_JOYPAD_Y : RETRO_DEVICE_ID_JOYPAD_B, "A", SDL_GAMEPAD_BUTTON_WEST, SDL_SCANCODE_Z);
-        add(md ? RETRO_DEVICE_ID_JOYPAD_B : RETRO_DEVICE_ID_JOYPAD_A, "B", SDL_GAMEPAD_BUTTON_SOUTH, SDL_SCANCODE_X);
-        add(md ? RETRO_DEVICE_ID_JOYPAD_A : RETRO_DEVICE_ID_JOYPAD_R, "C", SDL_GAMEPAD_BUTTON_EAST, SDL_SCANCODE_C);
-        add(md ? RETRO_DEVICE_ID_JOYPAD_L : RETRO_DEVICE_ID_JOYPAD_Y, "X", SDL_GAMEPAD_BUTTON_LEFT_SHOULDER,
-            SDL_SCANCODE_A);
+        add(RETRO_DEVICE_ID_JOYPAD_B, "A", SDL_GAMEPAD_BUTTON_WEST, SDL_SCANCODE_Z);
+        add(RETRO_DEVICE_ID_JOYPAD_A, "B", SDL_GAMEPAD_BUTTON_SOUTH, SDL_SCANCODE_X);
+        add(RETRO_DEVICE_ID_JOYPAD_R, "C", SDL_GAMEPAD_BUTTON_EAST, SDL_SCANCODE_C);
+        add(RETRO_DEVICE_ID_JOYPAD_Y, "X", SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, SDL_SCANCODE_A);
         add(RETRO_DEVICE_ID_JOYPAD_X, "Y", SDL_GAMEPAD_BUTTON_NORTH, SDL_SCANCODE_S);
-        if (md)
+        add(RETRO_DEVICE_ID_JOYPAD_L, "Z", SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, SDL_SCANCODE_D);
+        if (!md)
         {
-            add(RETRO_DEVICE_ID_JOYPAD_R, "Z", SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, SDL_SCANCODE_D);
-        }
-        else
-        {
-            add(RETRO_DEVICE_ID_JOYPAD_L, "Z", SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, SDL_SCANCODE_D);
             axis_button(RETRO_DEVICE_ID_JOYPAD_L2, "L", SDL_GAMEPAD_AXIS_LEFT_TRIGGER, SDL_SCANCODE_Q);
             axis_button(RETRO_DEVICE_ID_JOYPAD_R2, "R", SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, SDL_SCANCODE_E);
         }
+    }
+    else if (id == "gg" || id == "sms")
+    {
+        add(RETRO_DEVICE_ID_JOYPAD_A, "1", SDL_GAMEPAD_BUTTON_SOUTH, SDL_SCANCODE_Z);
+        add(RETRO_DEVICE_ID_JOYPAD_R, "2", SDL_GAMEPAD_BUTTON_EAST, SDL_SCANCODE_X);
     }
     else
     {
         const bool sony = id == "psx" || id == "psp";
         add(RETRO_DEVICE_ID_JOYPAD_A,
-            sony                          ? "Circle"
-            : (id == "gg" || id == "sms") ? "2"
-            : id == "pce"                 ? "I"
-                                          : "A",
+            sony          ? "Circle"
+            : id == "pce" ? "I"
+                          : "A",
             id == "gc" ? SDL_GAMEPAD_BUTTON_SOUTH : SDL_GAMEPAD_BUTTON_EAST, SDL_SCANCODE_X);
         add(RETRO_DEVICE_ID_JOYPAD_B,
-            sony                          ? "Cross"
-            : (id == "gg" || id == "sms") ? "1"
-            : id == "pce"                 ? "II"
-                                          : "B",
+            sony          ? "Cross"
+            : id == "pce" ? "II"
+                          : "B",
             id == "gc" ? SDL_GAMEPAD_BUTTON_WEST : SDL_GAMEPAD_BUTTON_SOUTH, SDL_SCANCODE_Z);
         if (id == "snes" || id == "nds" || id == "3ds" || id == "gc" || sony || id == "wii" || id == "generic" ||
             id == "pce")

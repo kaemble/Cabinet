@@ -1,6 +1,6 @@
 # Core builds
 
-[`cores.lock.json`](../cores.lock.json) pins the upstream revisions, archive checksums, licenses, and build options for all 14 catalog cores: Gambatte, mGBA, FCEUmm, Snes9x, Mupen64Plus-Next, melonDS DS, PicoDrive, Beetle PCE, SwanStation, Kronos, PPSSPP, Dolphin, Flycast, and Azahar. Builds use verified sources rather than moving branches or nightly binaries. Refer to the lockfile for exact versions.
+[`cores.lock.json`](../cores.lock.json) pins the upstream revisions, archive checksums, licenses, and build options for all 14 catalog cores: Gambatte, mGBA, FCEUmm, bsnes, Mupen64Plus-Next, melonDS DS, BlastEm, Beetle PCE, SwanStation, Beetle Saturn, PPSSPP, Dolphin, Flycast, and Azahar. Builds use verified sources rather than moving branches or nightly binaries. Refer to the lockfile for exact versions.
 
 Home discovers cores from the installed bundle or its configured development bundle, defaulting to `build/cores/<architecture>/`. It does not implicitly use the unmanaged `cores/` directory or copy it during installation. Explicit custom core paths remain supported.
 
@@ -35,8 +35,8 @@ Normal frontend compilation does not download or build cores. After configuring 
 `--core NAME` is repeatable and updates only selected cores, preserving the rest of the bundle:
 
 ```sh
-python3 tools/build_cores.py --arch x86_64 --core picodrive --jobs 4
-python3 tools/build_cores.py --arch x86_64 --core picodrive --verify
+python3 tools/build_cores.py --arch x86_64 --core blastem --jobs 4
+python3 tools/build_cores.py --arch x86_64 --core blastem --verify
 ```
 
 Each successful core is published immediately. Rerunning the same command skips verified unchanged cores and resumes failed compilation under `build/core-work/builds/ARCH/NAME/INPUT-HASH/`. Work trees are isolated by recipe, architecture, toolchain, builder, and environment.
@@ -46,6 +46,14 @@ Each successful core is published immediately. Rerunning the same command skips 
 Verification with `--core` checks only selected recipes. Full verification and installation require every locked core to be present and current. Recipe hashes prevent outdated cores from appearing current after a lockfile change. `--reuse DIRECTORY` can import verified per-core bundles from `DIRECTORY/NAME`, preserving provenance; it is unnecessary for ordinary build resumption.
 
 ## Core-specific behavior
+
+### Sega cartridges
+
+BlastEm is the default for Mega Drive, Master System, and Game Gear cartridges. Home extracts ZIP imports before launch. The pinned libretro branch uses the x86 JIT on x86-64 and generated CPU cores on ARM64. Its ROM database is embedded in the core. Mega Drive defaults to a six-button pad.
+
+### Super Nintendo and Sega Saturn
+
+bsnes loads cartridge content by path; Home extracts single-file SNES ZIP imports before launch. Beetle Saturn builds as `mednafen_saturn_libretro.so` and uses software rendering. Its disc formats are CUE, CCD, CHD, TOC, and M3U.
 
 ### Nintendo DS and 3DS
 
@@ -57,7 +65,7 @@ Azahar's recipe writes upstream `GIT-COMMIT` and `GIT-TAG` metadata from the loc
 
 ### Hardware renderers
 
-Flycast and Dolphin prefer Vulkan by default. Mupen64Plus-Next includes GLideN64/HLE and ParaLLEl-RDP/RSP; ParaLLEl-RDP needs an LLE RSP. Kronos uses the Linux `platform=unix` recipe with SSE disabled on ARM64, and its Musashi generator runs with the host compiler. See [video and performance](video.md) for runtime selection and settings.
+Flycast and Dolphin prefer Vulkan by default. Mupen64Plus-Next includes GLideN64/HLE and ParaLLEl-RDP/RSP; ParaLLEl-RDP needs an LLE RSP. See [video and performance](video.md) for runtime selection and settings.
 
 ## Installation and releases
 
