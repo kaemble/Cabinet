@@ -314,9 +314,10 @@ static void tests() {
         require(ui.gameplay()[RETRO_DEVICE_ID_JOYPAD_B], "South must map to game B");
         button(SDL_GAMEPAD_BUTTON_SOUTH, false);
         require(SDL_SetJoystickVirtualAxis(joystick, SDL_GAMEPAD_AXIS_LEFTX, 24000), SDL_GetError()); tick();
-        require(ui.gameplay()[RETRO_DEVICE_ID_JOYPAD_RIGHT], "Stick must map to D-pad");
-        require(SDL_SetJoystickVirtualAxis(joystick, SDL_GAMEPAD_AXIS_LEFTX, 4000), SDL_GetError()); tick();
-        require(!ui.gameplay()[RETRO_DEVICE_ID_JOYPAD_RIGHT], "Stick deadzone must suppress drift");
+        require(ui.input().axes[0] > 0, "Stick must map to analog input");
+        require(!ui.gameplay()[RETRO_DEVICE_ID_JOYPAD_RIGHT], "Generic stick must not map to D-pad");
+        require(SDL_SetJoystickVirtualAxis(joystick, SDL_GAMEPAD_AXIS_LEFTX, 1000), SDL_GetError()); tick();
+        require(ui.input().axes[0] == 0, "Stick deadzone must suppress drift");
         button(SDL_GAMEPAD_BUTTON_GUIDE, true);
         require(!ui.paused(), "Guide must not open the menu");
         button(SDL_GAMEPAD_BUTTON_GUIDE, false);

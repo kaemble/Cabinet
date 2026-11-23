@@ -143,7 +143,8 @@ void InputBindings::configure(const std::string& system, const std::filesystem::
     system_id = system;
     path = directory.empty() ? std::filesystem::path{} : directory / profile_name();
     bindings.clear();
-    digital_stick = id != "3ds" && id != "wii" && id != "dc" && id != "n64" && id != "gc" && id != "psp" && id != "psx";
+    digital_stick = id != "generic" && id != "3ds" && id != "wii" && id != "dc" && id != "n64" && id != "gc" &&
+                    id != "psp" && id != "psx";
     auto add = [&](int target, const std::string& name, SDL_GamepadButton pad, SDL_Scancode key)
     {
         bindings.push_back({target, name, (pad == SDL_GAMEPAD_BUTTON_INVALID) ? 0 : 1 + pad, key});
@@ -260,7 +261,7 @@ void InputBindings::configure(const std::string& system, const std::filesystem::
             }
         }
     }
-    if (!digital_stick || id == "generic")
+    if (!digital_stick)
     {
         const SDL_Scancode keys[]{SDL_SCANCODE_A, SDL_SCANCODE_D, SDL_SCANCODE_W, SDL_SCANCODE_S,
                                   SDL_SCANCODE_J, SDL_SCANCODE_L, SDL_SCANCODE_I, SDL_SCANCODE_K};

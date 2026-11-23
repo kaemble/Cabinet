@@ -191,6 +191,14 @@ int main(int argc,char** argv) {
                 if(binding.pad>=100) { auto ax=static_cast<SDL_GamepadAxis>((binding.pad-100)/2); axis(ax,(binding.pad&1)?32767:-32768); }
                 else if(binding.pad) button(static_cast<SDL_GamepadButton>(binding.pad-1),true);
                 value=input.sample(pad,keys.data());
+                if (std::string(system) == "generic" && binding.target >= 16)
+                {
+                    for (int target : {RETRO_DEVICE_ID_JOYPAD_UP, RETRO_DEVICE_ID_JOYPAD_DOWN,
+                                       RETRO_DEVICE_ID_JOYPAD_LEFT, RETRO_DEVICE_ID_JOYPAD_RIGHT})
+                    {
+                        require(!value.buttons[target], "Generic analog stick leaked into D-pad");
+                    }
+                }
                 if(binding.target<16) require(value.buttons[binding.target],"System default does not activate its button");
                 else if(binding.target<24) require(value.axes[(binding.target-16)/2]!=0,"System default does not activate analog direction");
                 else require(value.buttons[binding.target-20],"Digital stick alias missing");
