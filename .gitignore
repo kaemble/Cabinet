@@ -24,3 +24,5 @@ CMakeLists.txt.user*
 Thumbs.db
 
 *__pycache__*
+imgui.ini
+
