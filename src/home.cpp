@@ -42,6 +42,7 @@ enum class BrowsePurpose
 {
     Import,
     Custom,
+    Content,
     Locate,
     Core,
     Bios,
@@ -98,11 +99,11 @@ const char* browser_folder_key(BrowsePurpose purpose)
     {
         return "boxart";
     }
-    if (purpose == BrowsePurpose::Core)
+    if (purpose == BrowsePurpose::Core || purpose == BrowsePurpose::Custom)
     {
         return "core";
     }
-    if (purpose == BrowsePurpose::Import || purpose == BrowsePurpose::Custom || purpose == BrowsePurpose::Locate)
+    if (purpose == BrowsePurpose::Import || purpose == BrowsePurpose::Content || purpose == BrowsePurpose::Locate)
     {
         return "rom";
     }
@@ -682,9 +683,29 @@ void Home::choose_file(const fs::path& path)
         choice = 1;
         notify(result);
     }
-    else if (purpose == BrowsePurpose::Import || purpose == BrowsePurpose::Custom)
+    else if (purpose == BrowsePurpose::Import)
     {
-        import_file(path, purpose == BrowsePurpose::Custom);
+        import_file(path);
+    }
+    else if (purpose == BrowsePurpose::Custom)
+    {
+        boxart.reset();
+        draft = {};
+        draft.system = "generic";
+        draft.core = fs::canonical(path).string();
+        draft.title = path.stem().string();
+        editing = false;
+        dirty = false;
+        modal = Modal::Edit;
+        choice = 4;
+    }
+    else if (purpose == BrowsePurpose::Content)
+    {
+        draft.path = fs::canonical(path).string();
+        draft.title = path.stem().string();
+        dirty = true;
+        modal = Modal::Edit;
+        choice = 5;
     }
     else if (purpose == BrowsePurpose::BoxArt)
     {
@@ -819,6 +840,11 @@ std::vector<std::string> Home::modal_rows()
         if (editing)
         {
             rows.push_back(boxart.pending() ? "Box art: new image selected" : "Box art: choose image");
+        }
+        if (!editing && draft.system == "generic")
+        {
+            rows.push_back("ROM: " + (draft.path.empty() ? std::string("Skip (run without content)")
+                                                       : fs::path(draft.path).filename().string()));
         }
         rows.push_back(editing ? "Save changes" : "Add to library");
         rows.push_back("Cancel");
@@ -979,11 +1005,11 @@ void Home::back()
     if (modal == Modal::Browse)
     {
         modal = (purpose == BrowsePurpose::Bios) ? Modal::Bios
-                : (purpose == BrowsePurpose::Core || purpose == BrowsePurpose::BoxArt) ? Modal::Edit
+                : (purpose == BrowsePurpose::Core || purpose == BrowsePurpose::Content || purpose == BrowsePurpose::BoxArt) ? Modal::Edit
                 : (purpose == BrowsePurpose::Locate) ? Modal::Details
                 : (purpose == BrowsePurpose::Custom) ? Modal::Menu
                                                      : Modal::None;
-        choice = purpose == BrowsePurpose::BoxArt ? 4 : 0;
+        choice = (purpose == BrowsePurpose::BoxArt || purpose == BrowsePurpose::Content) ? 4 : 0;
         return;
     }
     if (modal == Modal::Settings)
@@ -1212,7 +1238,11 @@ void Home::activate(bool with_controller)
         {
             start_browse(BrowsePurpose::BoxArt);
         }
-        else if (choice == (editing ? 5 : 4))
+        else if (!editing && draft.system == "generic" && choice == 4)
+        {
+            start_browse(BrowsePurpose::Content);
+        }
+        else if (choice == ((editing || draft.system == "generic") ? 5 : 4))
         {
             if (!editing && (draft.system == "psx" || draft.system == "saturn") &&
                 !has_bios(draft.system, fs::path(data_dir) / "system"))
@@ -1401,13 +1431,19 @@ void Home::event(SDL_Event event)
     if (event.type == SDL_EVENT_KEY_DOWN)
     {
         auto key = event.key.scancode;
-        if (key == SDL_SCANCODE_F1 && !event.key.repeat)
+        if (key == SDL_SCANCODE_ESCAPE)
         {
-            open_menu();
-        }
-        else if (key == SDL_SCANCODE_ESCAPE)
-        {
-            back();
+            if (!event.key.repeat)
+            {
+                if (modal == Modal::None && !search && !typing_title)
+                {
+                    open_menu();
+                }
+                else
+                {
+                    back();
+                }
+            }
         }
         else if (key == SDL_SCANCODE_RETURN && !event.key.repeat)
         {
@@ -2106,8 +2142,8 @@ void Home::draw()
     const bool show_clear = pad && can_clear_search();
     const float clear_width = show_clear ? icon_size + gap + text.width("Clear", l.small) + between : 0;
     const bool show_menu = modal == Modal::None || modal == Modal::Menu;
-    const std::string menu_prompt = pad ? "Start: Menu" : "F1: Menu";
-    const float menu_width = show_menu ? text.width(menu_prompt, l.small) + between : 0;
+    const float menu_width = show_menu ? (pad ? text.width("Start: Menu", l.small)
+                                             : icon_size + gap + text.width("Menu", l.small)) + between : 0;
     float x = l.width - margin - 2 * (icon_size + gap) - text.width("Back", l.small) - text.width("Select", l.small) -
               between - clear_width - menu_width;
     const float prompt_y = (compact ? l.height - l.small - 14 : bottom + (l.bar_height - l.small) / 2 - 2) - lift;
@@ -2130,9 +2166,16 @@ void Home::draw()
     }
     if (show_menu)
     {
-        hits.push_back({{x, prompt_y - 4, menu_width - between, icon_size + 8}, 10, 0});
-        label(x, prompt_y, menu_prompt, l.small);
-        x += menu_width;
+        if (pad)
+        {
+            hits.push_back({{x, prompt_y - 4, menu_width - between, icon_size + 8}, 10, 0});
+            label(x, prompt_y, "Start: Menu", l.small);
+            x += menu_width;
+        }
+        else
+        {
+            prompt("keyboard_escape", "Menu", 10);
+        }
     }
     prompt(pad ? (swap_confirm_cancel ? "controller_buttons_south" : "controller_buttons_east") : "keyboard_escape",
            "Back", 5);
@@ -2201,7 +2244,7 @@ void Home::draw_modal()
 {
     hits.clear();
     const float available_height = layout.height - layout.bar_height - layout.gap * 2;
-    const bool editing_details = modal == Modal::Edit && editing;
+    const bool editing_details = modal == Modal::Edit && (editing || draft.system == "generic");
     const float scale = std::min(layout.body / 16.0f, available_height / (editing_details ? 600.0f : 540.0f));
     const float dw = std::min(800.0f, (layout.width - layout.gap * 2) / scale);
     const float modal_height = (modal == Modal::Menu) ? 330.0f
@@ -2234,6 +2277,8 @@ void Home::draw_modal()
                             ? ((purpose == BrowsePurpose::Archive) ? "Choose a ROM inside the ZIP"
                                : (purpose == BrowsePurpose::Bios)  ? "Choose a BIOS file"
                                : (purpose == BrowsePurpose::BoxArt) ? "Choose box art"
+                               : (purpose == BrowsePurpose::Core || purpose == BrowsePurpose::Custom) ? "Choose a core"
+                               : (purpose == BrowsePurpose::Content) ? "Choose a ROM"
                                                                    : "Choose a file")
                         : (modal == Modal::Edit)    ? editing ? "Edit game details" : "Add to library"
                         : (modal == Modal::Remove)  ? "Remove this game?"
@@ -2289,14 +2334,14 @@ void Home::draw_modal()
              ((sys < 0) ? "Unknown system" : systems()[sys].name) + "  /  " +
                  fs::path(game()->core).filename().string(),
              12, muted);
-        line(137, game()->path, 12, muted);
+        line(137, game()->path.empty() ? "No ROM (runs without content)" : game()->path, 12, muted);
         if (!game()->archive_member.empty())
         {
             line(160, "ROM: " + game()->archive_member, 12, muted);
         }
         line(184, "Save folder: " + game()->save_name, 12, muted);
         line(208, "Playtime: " + format_playtime(game()->playtime), 14, ink);
-        if (!fs::is_regular_file(game()->path))
+        if (!game()->path.empty() && !fs::is_regular_file(game()->path))
         {
             line(163, "File missing. Choose Locate file below.", 14, muted);
         }
@@ -2316,7 +2361,9 @@ void Home::draw_modal()
     {
         const float width = editing ? inner - 112 : inner;
         line(78, draft.path + (draft.archive_member.empty() ? "" : " / " + draft.archive_member), 12, muted, width);
-        line(107, editing ? "Changes are applied when you save." : "Choose a system and core, then confirm to save.",
+        line(107, editing ? "Changes are applied when you save."
+                          : (draft.system == "generic") ? "ROM can be skipped for cores that support running without content."
+                                                        : "Choose a system and core, then confirm to save.",
              14, muted, width);
         if (editing)
         {

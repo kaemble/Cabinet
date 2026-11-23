@@ -105,27 +105,12 @@ int main(int argc, char** argv)
             press(SDL_GAMEPAD_BUTTON_DPAD_DOWN);
             press(SDL_GAMEPAD_BUTTON_SOUTH);
             Library library(profile / "library.sqlite3");
-            require(library.games().empty(), "Choosing custom content must wait for core and confirmation");
-            bool rejected = false;
-            try
-            {
-                key(home, SDL_SCANCODE_DOWN);
-                key(home, SDL_SCANCODE_DOWN);
-                key(home, SDL_SCANCODE_RETURN);
-            }
-            catch (const std::exception&)
-            {
-                rejected = true;
-            }
-            require(rejected && library.games().empty(), "Custom entry without a core must be rejected");
-            key(home, SDL_SCANCODE_UP);
-            key(home, SDL_SCANCODE_UP);
+            require(library.games().empty(), "Choosing a core must wait for confirmation");
+            // The optional ROM row is selected after choosing the core.
             press(SDL_GAMEPAD_BUTTON_SOUTH);
             settle(home);
             press(SDL_GAMEPAD_BUTTON_DPAD_DOWN);
             press(SDL_GAMEPAD_BUTTON_SOUTH);
-            press(SDL_GAMEPAD_BUTTON_DPAD_DOWN);
-            press(SDL_GAMEPAD_BUTTON_DPAD_DOWN);
             press(SDL_GAMEPAD_BUTTON_SOUTH);
             const auto saved = library.games();
             require(saved.size() == 1 && saved[0].system == "generic" && saved[0].path == file && saved[0].core == core,
@@ -173,7 +158,7 @@ int main(int argc, char** argv)
         {
             std::ostringstream diagnostics;
             Home home(window, renderer, profile, "/bin/echo", {HomeLogLevel::Info, &diagnostics});
-            key(home, SDL_SCANCODE_F1);
+            key(home, SDL_SCANCODE_ESCAPE);
             key(home, SDL_SCANCODE_DOWN);
             key(home, SDL_SCANCODE_RETURN);
             key(home, SDL_SCANCODE_RETURN);
@@ -204,6 +189,30 @@ int main(int argc, char** argv)
             key(home, SDL_SCANCODE_LEFT);
             require(rejects_custom_at_last_tab(home, file), "Others must disappear after removing the last custom entry");
             require(fs::exists(file) && fs::exists(core), "Removing custom entry changed original files");
+        }
+        {
+            const auto contentless_profile = directory / "contentless-profile";
+            save_storage::write(contentless_profile / "browser.conf", {{"core", cores.string()}, {"rom", content.string()}});
+            std::ostringstream diagnostics;
+            Home home(window, renderer, contentless_profile, "/bin/echo", {HomeLogLevel::Info, &diagnostics});
+            key(home, SDL_SCANCODE_ESCAPE);
+            key(home, SDL_SCANCODE_RETURN);
+            settle(home);
+            key(home, SDL_SCANCODE_DOWN);
+            key(home, SDL_SCANCODE_RETURN);
+            key(home, SDL_SCANCODE_DOWN);
+            key(home, SDL_SCANCODE_RETURN);
+            Library library(contentless_profile / "library.sqlite3");
+            const auto saved = library.games();
+            require(saved.size() == 1 && saved[0].path.empty() && saved[0].core == core &&
+                    saved[0].system == "generic" && !saved[0].save_name.empty(),
+                    "Skipping ROM must persist a contentless custom entry");
+            home.draw();
+            key(home, SDL_SCANCODE_RETURN);
+            require(diagnostics.str().find("--core " + core.string()) != std::string::npos &&
+                    diagnostics.str().find("--rom") == std::string::npos,
+                    "Contentless launch must pass the core and omit --rom");
+            settle(home);
         }
         SDL_DestroyRenderer(renderer);
         SDL_DestroyWindow(window);

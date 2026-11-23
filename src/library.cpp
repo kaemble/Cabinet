@@ -262,13 +262,13 @@ void validate(const Game& g)
     {
         throw std::runtime_error("Choose a title and system first.");
     }
-    if (g.path.empty())
+    if (g.path.empty() && g.system != "generic")
     {
         throw std::runtime_error("Choose a game file first.");
     }
     if (g.system == "generic" && (g.core.empty() || !g.archive_member.empty()))
     {
-        throw std::runtime_error("Choose a core for the custom file.");
+        throw std::runtime_error("Choose a core for the custom entry.");
     }
 }
 
@@ -296,7 +296,8 @@ static std::string reserve_game_id(sqlite3* db)
 static std::string reserve_save_name(sqlite3* db, const Game& game)
 {
     const auto base = save_storage::folder_name(
-        fs::path(game.archive_member.empty() ? game.path : game.archive_member).stem().string());
+        game.path.empty() ? fs::path(game.core).stem().string()
+                          : fs::path(game.archive_member.empty() ? game.path : game.archive_member).stem().string());
     for (unsigned attempt = 0;; ++attempt)
     {
         auto name = base;
@@ -332,33 +333,50 @@ Library::Library(const fs::path& path) : core_cache(path.parent_path() / "core-i
     try
     {
         sqlite3_busy_timeout(db, 2000);
+        int schema_version = 0;
         {
             Statement version(db, "PRAGMA user_version");
             if (sqlite3_step(version.stmt) != SQLITE_ROW)
             {
                 throw std::runtime_error("Cannot read library schema version.");
             }
-            if (!fresh && sqlite3_column_int(version.stmt, 0) != 5)
+            schema_version = sqlite3_column_int(version.stmt, 0);
+            if (!fresh && schema_version != 5 && schema_version != 6)
             {
                 throw std::runtime_error(
                     "Unsupported library schema version. Create a new library with this Cabinet version.");
             }
         }
         sql(db, "PRAGMA journal_mode=WAL;");
-        if (fresh)
+        if (fresh || schema_version == 5)
         {
             sql(db, "BEGIN IMMEDIATE");
             try
             {
+                if (fresh)
+                {
+                    sql(db,
+                        "CREATE TABLE session_stats (id INTEGER PRIMARY KEY CHECK(id=1), count INTEGER NOT NULL); INSERT INTO session_stats VALUES(1,0);");
+                    sql(db,
+                        "CREATE TABLE game_ids (system TEXT NOT NULL, save_id TEXT NOT NULL, PRIMARY KEY(system,save_id));");
+                    sql(db,
+                        "CREATE TABLE save_names (system TEXT NOT NULL, name TEXT COLLATE NOCASE NOT NULL, PRIMARY KEY(system,name));");
+                }
+                else
+                {
+                    sql(db, "ALTER TABLE games RENAME TO old_games;");
+                }
                 sql(db,
-                    "CREATE TABLE session_stats (id INTEGER PRIMARY KEY CHECK(id=1), count INTEGER NOT NULL); INSERT INTO session_stats VALUES(1,0);");
-                sql(db,
-                    "CREATE TABLE games (id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT NOT NULL, title TEXT NOT NULL, system TEXT NOT NULL, core TEXT NOT NULL, favorite INTEGER NOT NULL DEFAULT 0, last_played INTEGER NOT NULL DEFAULT 0, save_id TEXT NOT NULL DEFAULT '', save_name TEXT NOT NULL DEFAULT '', archive_member TEXT NOT NULL DEFAULT '', playtime INTEGER NOT NULL DEFAULT 0 CHECK(playtime>=0), UNIQUE(path,archive_member));");
-                sql(db,
-                    "CREATE TABLE game_ids (system TEXT NOT NULL, save_id TEXT NOT NULL, PRIMARY KEY(system,save_id));");
-                sql(db,
-                    "CREATE TABLE save_names (system TEXT NOT NULL, name TEXT COLLATE NOCASE NOT NULL, PRIMARY KEY(system,name));");
-                sql(db, "PRAGMA user_version=5; COMMIT");
+                    "CREATE TABLE games (id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT NOT NULL, title TEXT NOT NULL, system TEXT NOT NULL, core TEXT NOT NULL, favorite INTEGER NOT NULL DEFAULT 0, last_played INTEGER NOT NULL DEFAULT 0, save_id TEXT NOT NULL DEFAULT '', save_name TEXT NOT NULL DEFAULT '', archive_member TEXT NOT NULL DEFAULT '', playtime INTEGER NOT NULL DEFAULT 0 CHECK(playtime>=0));");
+                if (!fresh)
+                {
+                    sql(db, "INSERT INTO games SELECT * FROM old_games;");
+                    sql(db, "UPDATE sqlite_sequence SET seq=max(seq,coalesce((SELECT seq FROM sqlite_sequence WHERE name='old_games'),0)) WHERE name='games';");
+                    sql(db, "DROP TABLE old_games;");
+                }
+                sql(db, "CREATE UNIQUE INDEX game_content ON games(path,archive_member) WHERE path<>'';");
+                sql(db, "CREATE UNIQUE INDEX game_contentless_core ON games(core) WHERE path='';");
+                sql(db, "PRAGMA user_version=6; COMMIT");
             }
             catch (...)
             {
@@ -461,14 +479,18 @@ std::int64_t Library::add(Game game)
     {
         throw std::runtime_error("This entry requires a ZIP archive");
     }
-    if (!fs::is_regular_file(game.path))
+    if (!game.path.empty() && !fs::is_regular_file(game.path))
     {
         throw std::runtime_error("Game file not found. Choose an existing file.");
     }
-    game.path = fs::canonical(game.path).string();
-    Statement find(db, "SELECT id FROM games WHERE path=? AND archive_member=?");
+    if (!game.path.empty())
+    {
+        game.path = fs::canonical(game.path).string();
+    }
+    Statement find(db, "SELECT id FROM games WHERE path=? AND archive_member=? AND (path<>'' OR core=?)");
     find.text(1, game.path);
     find.text(2, game.archive_member);
+    find.text(3, core_reference(game.core));
     if (sqlite3_step(find.stmt) == SQLITE_ROW)
     {
         return sqlite3_column_int64(find.stmt, 0);
@@ -551,7 +573,7 @@ void Library::update(const Game& game)
             {
                 throw std::runtime_error("This entry requires a ZIP archive");
             }
-            path = fs::weakly_canonical(game.path).string();
+            path = game.path.empty() ? "" : fs::weakly_canonical(game.path).string();
         }
         if (save_name.empty())
         {

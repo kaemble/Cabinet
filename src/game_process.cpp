@@ -73,7 +73,7 @@ void GameProcess::launch(const std::string& executable, const Game& game, const 
     {
         throw std::runtime_error("cabinet-runner is missing. Put it beside cabinet or use --runner PATH.");
     }
-    if (!std::filesystem::is_regular_file(game.path))
+    if (!game.path.empty() && !std::filesystem::is_regular_file(game.path))
     {
         throw std::runtime_error("Game file is missing. Use Locate file in game details.");
     }
@@ -81,7 +81,12 @@ void GameProcess::launch(const std::string& executable, const Game& game, const 
     {
         throw std::runtime_error("Core file is missing. Choose a core in Edit details.");
     }
-    std::vector<std::string> args{executable, "--rom", game.path, "--core", game.core, "--system", game.system};
+    std::vector<std::string> args{executable, "--core", game.core, "--system", game.system};
+    if (!game.path.empty())
+    {
+        args.push_back("--rom");
+        args.push_back(game.path);
+    }
     if (!game.save_id.empty())
     {
         args.push_back("--game-id");

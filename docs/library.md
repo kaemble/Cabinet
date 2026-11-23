@@ -2,9 +2,9 @@
 
 ## Import and organize
 
-Press **Start** on a controller, **F1** on the keyboard, or click **Menu** in the bottom bar to open Home's menu. It contains **Add custom entry**, **Settings**, and **Close Cabinet**. Close the running game before closing Cabinet.
+Press **Start** on a controller, **Esc** on the keyboard, or click **Menu** in the bottom bar to open Home's menu. It contains **Add custom entry**, **Settings**, and **Close Cabinet**. Close the running game before closing Cabinet.
 
-**Add custom entry** accepts any file type and lets you choose its core. Custom entries use the generic system and appear under **Others** in the sidebar; that tab is hidden when there are no custom entries. ZIP files added this way are passed directly to the selected core without extraction. The core must support the chosen file.
+**Add custom entry** asks for a core first. Select the **ROM** row to choose a file of any type, or leave it skipped and choose **Add to library** for a contentless core (`supports_no_game = "true"`). The runner checks that the core supports running without content. Custom entries use the generic system and appear under **Others** in the sidebar; that tab is hidden when there are no custom entries. ZIP files added this way are passed directly to the selected core without extraction. The core must support the chosen file.
 
 **Settings** saves Home's confirm/cancel swap and dual-screen preferences in `home.conf` under the data directory. Swapping exchanges the controller's south/east actions in Home and adds `--swap-confirm-cancel` to runner launches. Enabling dual-screen adds `--dual-screen`, which the runner applies to DS/3DS games. Keyboard Enter/Escape retain their usual actions. `CABINET_DUAL_SCREEN=1` also continues to enable dual-screen launches.
 

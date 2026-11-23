@@ -154,6 +154,47 @@ int main(int argc, char** argv) {
             Library reopened(database);
             require(reopened.games().front().id == identity && reopened.games().front().playtime == 100, "Startup did not recover manifest playtime");
         }
+        {
+            const auto database = dir / "contentless.sqlite3";
+            Game original;
+            {
+                Library library(database);
+                const auto id = library.add({0, second.string(), "Existing game", "gb", "core.so"});
+                original = *library.game(id);
+            }
+            sqlite3* old = nullptr;
+            require(sqlite3_open(database.string().c_str(), &old) == SQLITE_OK, "Cannot open migration fixture");
+            require(sqlite3_exec(old,
+                "BEGIN; ALTER TABLE games RENAME TO new_games;"
+                "CREATE TABLE games (id INTEGER PRIMARY KEY AUTOINCREMENT, path TEXT NOT NULL, title TEXT NOT NULL, system TEXT NOT NULL, core TEXT NOT NULL, favorite INTEGER NOT NULL DEFAULT 0, last_played INTEGER NOT NULL DEFAULT 0, save_id TEXT NOT NULL DEFAULT '', save_name TEXT NOT NULL DEFAULT '', archive_member TEXT NOT NULL DEFAULT '', playtime INTEGER NOT NULL DEFAULT 0 CHECK(playtime>=0), UNIQUE(path,archive_member));"
+                "INSERT INTO games SELECT * FROM new_games; DROP TABLE new_games; PRAGMA user_version=5; COMMIT;",
+                nullptr, nullptr, nullptr) == SQLITE_OK, "Cannot create version 5 library fixture");
+            sqlite3_close(old);
+            std::int64_t first_id, second_id;
+            {
+                Library library(database);
+                const auto migrated = library.game(original.id);
+                require(migrated && migrated->path == original.path && migrated->save_id == original.save_id &&
+                        migrated->save_name == original.save_name, "Migration changed existing game identity or saves");
+                Game first{0, "", "First core", "generic", "first_libretro.so"};
+                first_id = library.add(first);
+                second_id = library.add({0, "", "Second core", "generic", "second_libretro.so"});
+                require(first_id != second_id && library.add(first) == first_id && library.games().size() == 3,
+                        "Contentless entries must deduplicate by core and coexist with ROM entries");
+                auto edited = *library.game(first_id);
+                edited.title = "Renamed core";
+                edited.favorite = true;
+                library.update(edited);
+                require(library.game(first_id)->path.empty() && library.game(first_id)->favorite,
+                        "Editing contentless details changed the empty ROM path");
+            }
+            Library reopened(database);
+            const auto first = reopened.game(first_id), second_core = reopened.game(second_id);
+            require(first && second_core && first->path.empty() && second_core->path.empty() &&
+                    !first->save_name.empty() && first->save_name != second_core->save_name &&
+                    first->save_id != second_core->save_id,
+                    "Contentless entries must retain independent saves after reopening");
+        }
         std::cout << "Library persistence, imports, filters, relocation, and removal passed\n";
         return 0;
     } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }
