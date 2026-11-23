@@ -4,6 +4,7 @@
 #include "rom_archive.h"
 #include "test_support.h"
 #include <SDL3/SDL.h>
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
@@ -78,6 +79,23 @@ int main(int argc, char** argv)
         selected.core = argv[2];
         library.update(selected);
         require(library.game(id)->core == selected.core, "Switching back to a memory core failed");
+        const auto custom_zip = directory.path / "custom.zip";
+        std::ofstream(custom_zip) << "Core-managed archive fixture";
+        const auto custom_id = library.add({0, custom_zip.string(), "Custom archive", "generic", argv[2]});
+        auto custom = *library.game(custom_id);
+        custom.title = "Renamed custom archive";
+        library.update(custom);
+        process.start(argv[1], *library.game(custom_id),
+                      {"--frames", "4", "--no-audio", "--data-dir", directory.path.string()});
+        status.reset();
+        const auto custom_deadline = SDL_GetTicks() + 10000;
+        while (!status && SDL_GetTicks() < custom_deadline)
+        {
+            status = process.poll();
+            SDL_Delay(5);
+        }
+        require(status && *status == 0 && process.ready(), "Custom ZIP was not passed directly to its core");
+        require(custom.archive_member.empty() && fs::is_regular_file(custom_zip), "Custom ZIP was treated as an extracted import");
         SDL_Quit();
         std::cout << "ZIP core selection, extracted file launch, and cleanup passed\n";
         return 0;

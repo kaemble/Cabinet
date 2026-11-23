@@ -2,6 +2,12 @@
 
 ## Import and organize
 
+Press **Start** on a controller, **F1** on the keyboard, or click **Menu** in the bottom bar to open Home's menu. It contains **Add custom entry**, **Settings**, and **Close Cabinet**. Close the running game before closing Cabinet.
+
+**Add custom entry** accepts any file type and lets you choose its core. Custom entries use the generic system and appear under **Others** in the sidebar; that tab is hidden when there are no custom entries. ZIP files added this way are passed directly to the selected core without extraction. The core must support the chosen file.
+
+**Settings** saves Home's confirm/cancel swap and dual-screen preferences in `home.conf` under the data directory. Swapping exchanges the controller's south/east actions in Home and adds `--swap-confirm-cancel` to runner launches. Enabling dual-screen adds `--dual-screen`, which the runner applies to DS/3DS games. Keyboard Enter/Escape retain their usual actions. `CABINET_DUAL_SCREEN=1` also continues to enable dual-screen launches.
+
 Select a system in the sidebar, then choose **Add game** or press **I**. Dragging files onto Home also opens import review and requires a selected system. Review the title, system, and core before choosing **Add to library**; the selected system's bundled core is the default, and a custom core can be selected.
 
 Open a game's details to play, edit its title or core, mark it as a favorite, locate a moved file, or remove it. Removal leaves ROMs and saves untouched. Locate file preserves the game's identity and metadata. Importing an existing canonical path selects its entry; same-named files in different folders remain separate games.

@@ -29,6 +29,8 @@ constexpr SDL_Color ink{255, 255, 255, 255}, muted{187, 187, 187, 255}, accent{1
 enum class Modal
 {
     None,
+    Menu,
+    Settings,
     Details,
     Edit,
     Browse,
@@ -39,6 +41,7 @@ enum class Modal
 enum class BrowsePurpose
 {
     Import,
+    Custom,
     Locate,
     Core,
     Bios,
@@ -99,7 +102,7 @@ const char* browser_folder_key(BrowsePurpose purpose)
     {
         return "core";
     }
-    if (purpose == BrowsePurpose::Import || purpose == BrowsePurpose::Locate)
+    if (purpose == BrowsePurpose::Import || purpose == BrowsePurpose::Custom || purpose == BrowsePurpose::Locate)
     {
         return "rom";
     }
@@ -124,6 +127,9 @@ public:
           boxart(renderer, data), library(data / "library.sqlite3"), process(logger), logger(logger), executable(std::move(executable)),
           data_dir(data.string())
     {
+        const auto settings = save_storage::read(fs::path(data_dir) / "home.conf");
+        swap_confirm_cancel = settings.contains("swap_confirm_cancel") && settings.at("swap_confirm_cancel") == "1";
+        dual_screen = settings.contains("dual_screen") && settings.at("dual_screen") == "1";
         all = library.games();
         refilter();
         if (!discover())
@@ -156,7 +162,7 @@ public:
         int columns = 3, grid_rows = 2, list_rows = 8;
     } layout;
     void update_layout();
-    void import_file(const fs::path& path);
+    void import_file(const fs::path& path, bool custom = false);
     void select_system(const std::string& id);
     void report_error(const std::string& error)
     {
@@ -180,6 +186,7 @@ private:
     std::vector<Hit> hits;
     int sidebar = 0, selected = 0, focus = 0, toolbar = 0, first_row = 0;
     bool list_view = false, search = false, typing_title = false;
+    bool swap_confirm_cancel = false, dual_screen = false;
     TextEdit text_edit;
     float text_scroll = 0;
     SDL_FRect text_rect{};
@@ -202,7 +209,7 @@ private:
     int sidebar_tracked = -1;
     float sidebar_view_height = 0;
     SDL_Gamepad* pad = nullptr;
-    std::array<bool, 7> previous{};
+    std::array<bool, 8> previous{};
     bool controller_blocked = true;
     std::uint64_t repeat_at = 0;
     int repeat_direction = 0;
@@ -229,6 +236,17 @@ private:
     void navigate(int dx, int dy);
     void activate(bool with_controller = false);
     void back();
+    void open_menu();
+    void request_close();
+    int system_count() const
+    {
+        const bool custom = std::any_of(all.begin(), all.end(),
+                                        [](const Game& game)
+                                        {
+                                            return game.system == "generic";
+                                        });
+        return static_cast<int>(systems().size()) - (custom ? 0 : 1);
+    }
     void start_browse(BrowsePurpose intent);
     void remember_folder(BrowsePurpose intent, const fs::path& path);
     void read_folder(const fs::path& path);
@@ -308,6 +326,7 @@ void Home::refresh(std::int64_t id)
 void Home::refilter(std::int64_t preserve)
 {
     needs_redraw = true;
+    sidebar = std::clamp(sidebar, 0, system_count() + 2);
     if (sidebar < 3 && toolbar == 0)
     {
         toolbar = 1;
@@ -559,12 +578,12 @@ void Home::select_system(const std::string& id)
     {
         throw std::runtime_error("Unknown system: " + id);
     }
-    sidebar = index + 3;
+    sidebar = index < system_count() ? index + 3 : 0;
     refilter();
 }
-void Home::import_file(const fs::path& path)
+void Home::import_file(const fs::path& path, bool custom)
 {
-    if (sidebar < 3)
+    if (!custom && sidebar < 3)
     {
         throw std::runtime_error("Select a system before adding a game.");
     }
@@ -577,10 +596,19 @@ void Home::import_file(const fs::path& path)
     draft = {};
     draft.path = fs::canonical(path).string();
     draft.title = path.stem().string();
-    const auto& selected_system = systems()[sidebar - 3];
+    const auto& selected_system = systems()[custom ? system_index("generic") : sidebar - 3];
     draft.system = selected_system.id;
     draft.core = bundled_core(selected_system).string();
     remember_folder(BrowsePurpose::Import, fs::path(draft.path).parent_path());
+    if (draft.system == "generic")
+    {
+        editing = false;
+        dirty = false;
+        modal = Modal::Edit;
+        choice = 2;
+        folder = fs::path(draft.path).parent_path();
+        return;
+    }
     if (rom_archive::is_zip(path))
     {
         purpose = BrowsePurpose::Archive;
@@ -654,9 +682,9 @@ void Home::choose_file(const fs::path& path)
         choice = 1;
         notify(result);
     }
-    else if (purpose == BrowsePurpose::Import)
+    else if (purpose == BrowsePurpose::Import || purpose == BrowsePurpose::Custom)
     {
-        import_file(path);
+        import_file(path, purpose == BrowsePurpose::Custom);
     }
     else if (purpose == BrowsePurpose::BoxArt)
     {
@@ -720,8 +748,12 @@ void Home::finish_import()
 }
 void Home::set_system(int direction)
 {
+    if (draft.system == "generic")
+    {
+        return;
+    }
     int index = system_index(draft.system);
-    const int count = static_cast<int>(systems().size());
+    const int count = static_cast<int>(systems().size()) - 1;
     index = (index < 0) ? ((direction > 0) ? 0 : count - 1) : (index + direction + count) % count;
     draft.system = systems()[index].id;
     draft.core = bundled_core(systems()[index]).string();
@@ -749,6 +781,15 @@ void Home::close_editor()
 }
 std::vector<std::string> Home::modal_rows()
 {
+    if (modal == Modal::Menu)
+    {
+        return {"Add custom entry", "Settings", "Close Cabinet", "Back"};
+    }
+    if (modal == Modal::Settings)
+    {
+        return {std::string("Swap confirm/cancel: ") + (swap_confirm_cancel ? "on" : "off"),
+                std::string("Dual-screen runner: ") + (dual_screen ? "on" : "off"), "Back"};
+    }
     if (modal == Modal::Bios)
     {
         return {"Choose BIOS file", bios_for_import ? (bios_installed ? "Continue import" : "Skip for now") : "Done",
@@ -770,7 +811,8 @@ std::vector<std::string> Home::modal_rows()
     {
         int sys = system_index(draft.system);
         std::vector<std::string> rows{"Title: " + draft.title,
-                                      "System: " + ((sys < 0) ? std::string("Choose a system") : systems()[sys].name),
+                                      "System: " + (draft.system == "generic" ? std::string("Generic")
+                                                      : (sys < 0) ? std::string("Choose a system") : systems()[sys].name),
                                       "Core: " + (draft.core.empty() ? std::string("Choose a core file")
                                                                      : fs::path(draft.core).filename().string()),
                                       draft.favorite ? "Favorite: yes" : "Favorite: no"};
@@ -861,7 +903,7 @@ void Home::navigate(int dx, int dy)
     {
         if (dy)
         {
-            sidebar = std::clamp(sidebar + dy, 0, static_cast<int>(systems().size()) + 2);
+            sidebar = std::clamp(sidebar + dy, 0, system_count() + 2);
             refilter();
         }
         if (dx > 0)
@@ -939,11 +981,21 @@ void Home::back()
         modal = (purpose == BrowsePurpose::Bios) ? Modal::Bios
                 : (purpose == BrowsePurpose::Core || purpose == BrowsePurpose::BoxArt) ? Modal::Edit
                 : (purpose == BrowsePurpose::Locate) ? Modal::Details
+                : (purpose == BrowsePurpose::Custom) ? Modal::Menu
                                                      : Modal::None;
         choice = purpose == BrowsePurpose::BoxArt ? 4 : 0;
         return;
     }
-    if (modal == Modal::Edit)
+    if (modal == Modal::Settings)
+    {
+        modal = Modal::Menu;
+        choice = 1;
+    }
+    else if (modal == Modal::Menu)
+    {
+        modal = Modal::None;
+    }
+    else if (modal == Modal::Edit)
     {
         if (dirty)
         {
@@ -980,8 +1032,77 @@ void Home::back()
         focus = 0;
     }
 }
+void Home::open_menu()
+{
+    if (modal == Modal::Menu)
+    {
+        back();
+    }
+    else if (modal == Modal::None)
+    {
+        stop_text();
+        modal = Modal::Menu;
+        choice = 0;
+    }
+    needs_redraw = true;
+}
+void Home::request_close()
+{
+    if (process.active())
+    {
+        notify("Quit the game from its menu before closing the library.");
+    }
+    else if (dirty && (modal == Modal::Edit || modal == Modal::Discard))
+    {
+        stop_text();
+        modal = Modal::Discard;
+        choice = 0;
+        exit_after_discard = true;
+    }
+    else
+    {
+        running = false;
+    }
+}
 void Home::activate(bool with_controller)
 {
+    if (modal == Modal::Menu)
+    {
+        if (choice == 0)
+        {
+            start_browse(BrowsePurpose::Custom);
+        }
+        else if (choice == 1)
+        {
+            modal = Modal::Settings;
+            choice = 0;
+        }
+        else if (choice == 2)
+        {
+            request_close();
+        }
+        else
+        {
+            back();
+        }
+        return;
+    }
+    if (modal == Modal::Settings)
+    {
+        if (choice == 2)
+        {
+            back();
+            return;
+        }
+        const bool next_swap = choice == 0 ? !swap_confirm_cancel : swap_confirm_cancel;
+        const bool next_dual = choice == 1 ? !dual_screen : dual_screen;
+        save_storage::write(fs::path(data_dir) / "home.conf",
+                            {{"swap_confirm_cancel", next_swap ? "1" : "0"}, {"dual_screen", next_dual ? "1" : "0"}});
+        swap_confirm_cancel = next_swap;
+        dual_screen = next_dual;
+        block_controller();
+        return;
+    }
     if (modal == Modal::Bios)
     {
         if (choice == 0)
@@ -1119,6 +1240,14 @@ void Home::activate(bool with_controller)
         if (choice == 0)
         {
             std::vector<std::string> arguments{"--data-dir", data_dir, "--title", game()->title};
+            if (swap_confirm_cancel)
+            {
+                arguments.push_back("--swap-confirm-cancel");
+            }
+            if (dual_screen)
+            {
+                arguments.push_back("--dual-screen");
+            }
             if (with_controller && library.session_count() < 3)
             {
                 arguments.push_back("--show-menu-hint");
@@ -1226,21 +1355,7 @@ void Home::event(SDL_Event event)
     }
     if (event.type == SDL_EVENT_QUIT || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED)
     {
-        if (process.active())
-        {
-            notify("Quit the game from its menu before closing the library.");
-        }
-        else if (dirty && (modal == Modal::Edit || modal == Modal::Discard))
-        {
-            stop_text();
-            modal = Modal::Discard;
-            choice = 0;
-            exit_after_discard = true;
-        }
-        else
-        {
-            running = false;
-        }
+        request_close();
         return;
     }
     if (event.type == SDL_EVENT_GAMEPAD_ADDED && discover())
@@ -1286,7 +1401,11 @@ void Home::event(SDL_Event event)
     if (event.type == SDL_EVENT_KEY_DOWN)
     {
         auto key = event.key.scancode;
-        if (key == SDL_SCANCODE_ESCAPE)
+        if (key == SDL_SCANCODE_F1 && !event.key.repeat)
+        {
+            open_menu();
+        }
+        else if (key == SDL_SCANCODE_ESCAPE)
         {
             back();
         }
@@ -1459,11 +1578,15 @@ void Home::event(SDL_Event event)
                 {
                     clear_search();
                 }
+                if (kind == 10)
+                {
+                    open_menu();
+                }
                 if (kind == 7)
                 {
                     focus = 0;
                     const float view = layout.height - layout.bar_height;
-                    const float total = layout.systems_top + systems().size() * (layout.system_height + 4) + layout.gap;
+                    const float total = layout.systems_top + system_count() * (layout.system_height + 4) + layout.gap;
                     const float track = view - 8, thumb = track * view / total;
                     sidebar_scroll =
                         std::clamp((point.y - 4 - thumb / 2) / (track - thumb), 0.0f, 1.0f) * (total - view);
@@ -1593,13 +1716,14 @@ void Home::controller_input(bool focused)
     };
     int x = pad ? SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFTX) : 0;
     int y = pad ? SDL_GetGamepadAxis(pad, SDL_GAMEPAD_AXIS_LEFTY) : 0;
-    std::array<bool, 7> input{b(SDL_GAMEPAD_BUTTON_DPAD_UP) || y < -16000,
+    std::array<bool, 8> input{b(SDL_GAMEPAD_BUTTON_DPAD_UP) || y < -16000,
                               b(SDL_GAMEPAD_BUTTON_DPAD_DOWN) || y > 16000,
                               b(SDL_GAMEPAD_BUTTON_DPAD_LEFT) || x < -16000,
                               b(SDL_GAMEPAD_BUTTON_DPAD_RIGHT) || x > 16000,
                               b(SDL_GAMEPAD_BUTTON_SOUTH),
                               b(SDL_GAMEPAD_BUTTON_EAST),
-                              b(SDL_GAMEPAD_BUTTON_NORTH)};
+                              b(SDL_GAMEPAD_BUTTON_NORTH),
+                              b(SDL_GAMEPAD_BUTTON_START)};
     // Focus can return before a backend reports a fresh axis value. Never
     // rearm auto-repeat from that cached tilt: require neutral menu input first.
     if (controller_blocked)
@@ -1624,12 +1748,18 @@ void Home::controller_input(bool focused)
         repeat_at = SDL_GetTicks() + ((direction != repeat_direction) ? 350 : 120);
     }
     repeat_direction = direction;
-    if (input[4] && !previous[4])
+    const int confirm = swap_confirm_cancel ? 5 : 4;
+    const int cancel = swap_confirm_cancel ? 4 : 5;
+    if (input[7] && !previous[7])
+    {
+        open_menu();
+    }
+    else if (input[confirm] && !previous[confirm])
     {
         needs_redraw = true;
         activate(true);
     }
-    else if (input[5] && !previous[5])
+    else if (input[cancel] && !previous[cancel])
     {
         needs_redraw = true;
         back();
@@ -1721,7 +1851,7 @@ void Home::update_layout()
     // Layout uses window points; SDL maps these to all available output pixels.
     SDL_SetRenderLogicalPresentation(renderer, width, height, SDL_LOGICAL_PRESENTATION_STRETCH);
     const float view_height = layout.height - layout.bar_height;
-    const float total_height = layout.systems_top + systems().size() * (layout.system_height + 4) + layout.gap;
+    const float total_height = layout.systems_top + system_count() * (layout.system_height + 4) + layout.gap;
     if (sidebar_tracked != sidebar || sidebar_view_height != view_height)
     {
         const float selected_y = (sidebar < 3) ? layout.gap * 2 + layout.body + sidebar * (layout.system_height + 4)
@@ -1765,7 +1895,7 @@ void Home::draw()
     }
     label(l.gap * 2, l.systems_top - l.body - l.gap - sidebar_scroll, "SYSTEMS", std::max(11, l.body * 2 / 3), muted,
           side_width);
-    for (int i = 0; i < static_cast<int>(systems().size()); ++i)
+    for (int i = 0; i < system_count(); ++i)
     {
         const auto& system = systems()[i];
         int count = static_cast<int>(std::count_if(all.begin(), all.end(),
@@ -1794,7 +1924,7 @@ void Home::draw()
         hit.rect.y = std::clamp(hit.rect.y, 0.0f, bottom);
         hit.rect.h = std::max(0.0f, end - hit.rect.y);
     }
-    const float sidebar_total = l.systems_top + systems().size() * (l.system_height + 4) + l.gap;
+    const float sidebar_total = l.systems_top + system_count() * (l.system_height + 4) + l.gap;
     if (sidebar_total > bottom)
     {
         const float track_height = bottom - 8;
@@ -1975,8 +2105,11 @@ void Home::draw()
     const float between = l.small, lift = l.small * .15f;
     const bool show_clear = pad && can_clear_search();
     const float clear_width = show_clear ? icon_size + gap + text.width("Clear", l.small) + between : 0;
+    const bool show_menu = modal == Modal::None || modal == Modal::Menu;
+    const std::string menu_prompt = pad ? "Start: Menu" : "F1: Menu";
+    const float menu_width = show_menu ? text.width(menu_prompt, l.small) + between : 0;
     float x = l.width - margin - 2 * (icon_size + gap) - text.width("Back", l.small) - text.width("Select", l.small) -
-              between - clear_width;
+              between - clear_width - menu_width;
     const float prompt_y = (compact ? l.height - l.small - 14 : bottom + (l.bar_height - l.small) / 2 - 2) - lift;
     label(margin, bottom + (compact ? 6 : (l.bar_height - l.small) / 2 - 2) - lift,
           process.active() ? (process.ready() ? "Game running" : "Preparing game...")
@@ -1995,8 +2128,16 @@ void Home::draw()
     {
         prompt("controller_buttons_north", "Clear", 9);
     }
-    prompt(pad ? "controller_buttons_east" : "keyboard_escape", "Back", 5);
-    prompt(pad ? "controller_buttons_south" : "keyboard_enter", "Select", 6);
+    if (show_menu)
+    {
+        hits.push_back({{x, prompt_y - 4, menu_width - between, icon_size + 8}, 10, 0});
+        label(x, prompt_y, menu_prompt, l.small);
+        x += menu_width;
+    }
+    prompt(pad ? (swap_confirm_cancel ? "controller_buttons_south" : "controller_buttons_east") : "keyboard_escape",
+           "Back", 5);
+    prompt(pad ? (swap_confirm_cancel ? "controller_buttons_east" : "controller_buttons_south") : "keyboard_enter",
+           "Select", 6);
     if (!message.empty() && SDL_GetTicks() < message_until)
     {
         const float width = l.content - l.gap * 2;
@@ -2063,8 +2204,11 @@ void Home::draw_modal()
     const bool editing_details = modal == Modal::Edit && editing;
     const float scale = std::min(layout.body / 16.0f, available_height / (editing_details ? 600.0f : 540.0f));
     const float dw = std::min(800.0f, (layout.width - layout.gap * 2) / scale);
+    const float modal_height = (modal == Modal::Menu) ? 330.0f
+                               : (modal == Modal::Settings) ? 280.0f
+                               : editing_details ? 640.0f : 590.0f;
     const float dh = (modal == Modal::Browse) ? available_height / scale
-                                             : std::min(editing_details ? 640.0f : 590.0f, available_height / scale);
+                                             : std::min(modal_height, available_height / scale);
     const float left = (layout.width - dw * scale) / 2;
     const float top = (layout.height - layout.bar_height - dh * scale) / 2;
     const float x = 24, inner = dw - 48;
@@ -2083,7 +2227,9 @@ void Home::draw_modal()
     box({0, 0, layout.width, layout.height}, {0, 0, 0, 180});
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
     box({left, top, dw * scale, dh * scale}, {32, 32, 32, 255});
-    std::string title = (modal == Modal::Bios) ? (bios_system == "psx" ? "PlayStation BIOS" : "Sega Saturn BIOS")
+    std::string title = (modal == Modal::Menu) ? "Cabinet menu"
+                        : (modal == Modal::Settings) ? "Home settings"
+                        : (modal == Modal::Bios) ? (bios_system == "psx" ? "PlayStation BIOS" : "Sega Saturn BIOS")
                         : (modal == Modal::Browse)
                             ? ((purpose == BrowsePurpose::Archive) ? "Choose a ROM inside the ZIP"
                                : (purpose == BrowsePurpose::Bios)  ? "Choose a BIOS file"
@@ -2130,7 +2276,9 @@ void Home::draw_modal()
             button({x, 114.0f + (i - browse_top) * 50, inner, 38}, name, i == browse_selected, 4, i,
                    entry.directory ? (parent ? "folder_open" : "folder") : "");
         }
-        line(dh - 38, "Enter / South: open    Left / Right: jump by letter    Esc / East: cancel", 13, muted);
+        line(dh - 38, swap_confirm_cancel
+                         ? "Enter / East: open    Left / Right: jump by letter    Esc / South: cancel"
+                         : "Enter / South: open    Left / Right: jump by letter    Esc / East: cancel", 13, muted);
         return;
     }
     if (modal == Modal::Details && game())
@@ -2192,7 +2340,8 @@ void Home::draw_modal()
     for (std::size_t i = 0; i < rows.size(); ++i)
     {
         std::string value = rows[i];
-        const float rows_top = (modal == Modal::Details) ? 236.0f : 200.0f;
+        const float rows_top = (modal == Modal::Details) ? 236.0f
+                               : (modal == Modal::Menu || modal == Modal::Settings) ? 100.0f : 200.0f;
         button({x, rows_top + static_cast<float>(i) * 50, inner, 38}, value, choice == static_cast<int>(i), 3,
                static_cast<int>(i));
     }
@@ -2200,6 +2349,7 @@ void Home::draw_modal()
     {
         line(dh - 38,
              typing_title ? "Arrows move. Shift selects. Ctrl+A selects all. Enter finishes."
+                          : draft.system == "generic" ? "Generic system. Core: select to browse."
                           : "System: Left / Right to change. Core: select to browse.",
              13, muted);
     }
@@ -2324,7 +2474,7 @@ int run_home(int argc, char** argv)
     }
     if (!import.empty())
     {
-        home.import_file(import);
+        home.import_file(import, import_system == "generic");
     }
     int ticks = 0;
     bool presented = false;

@@ -46,7 +46,7 @@ void GameProcess::start(const std::string& executable, const Game& game, const s
     {
         throw std::runtime_error("A game is already running. Close its window before launching another.");
     }
-    if (rom_archive::is_zip(game.path))
+    if (rom_archive::is_zip(game.path) && game.system != "generic")
     {
         if (game.archive_member.empty())
         {

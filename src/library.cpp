@@ -83,6 +83,8 @@ const std::vector<SystemInfo>& systems()
                   {
                       return SDL_strcasecmp(a.name.c_str(), b.name.c_str()) < 0;
                   });
+        // Keep the custom category last so Home can hide it when empty.
+        entries.push_back({"generic", "Others", "Others", "", "", {}});
         return entries;
     }();
     return catalog;
@@ -139,6 +141,10 @@ static fs::path bundled_core_path(const std::string& name)
 }
 fs::path bundled_core(const SystemInfo& system)
 {
+    if (system.core.empty())
+    {
+        return {};
+    }
     return bundled_core_path(system.core);
 }
 
@@ -259,6 +265,10 @@ void validate(const Game& g)
     if (g.path.empty())
     {
         throw std::runtime_error("Choose a game file first.");
+    }
+    if (g.system == "generic" && (g.core.empty() || !g.archive_member.empty()))
+    {
+        throw std::runtime_error("Choose a core for the custom file.");
     }
 }
 
@@ -429,7 +439,7 @@ std::optional<Game> Library::game(std::int64_t id) const
 std::int64_t Library::add(Game game)
 {
     validate(game);
-    if (rom_archive::is_zip(game.path))
+    if (rom_archive::is_zip(game.path) && game.system != "generic")
     {
         if (game.archive_member.empty())
         {
@@ -519,7 +529,7 @@ void Library::update(const Game& game)
         }
         if (content_changed)
         {
-            if (rom_archive::is_zip(game.path))
+            if (rom_archive::is_zip(game.path) && game.system != "generic")
             {
                 if (game.archive_member.empty())
                 {

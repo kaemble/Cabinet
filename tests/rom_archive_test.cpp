@@ -11,7 +11,7 @@ static void require(bool value, const char* message) { if (!value) throw std::ru
 template<class F> static void rejects(F f) { bool caught = false; try { f(); } catch (const std::exception&) { caught = true; } require(caught, "Invalid archive operation succeeded"); }
 int main(int argc, char** argv) {
  try {
-    require(argc == 2, "Expected scratch directory"); require(SDL_Init(0), SDL_GetError());
+    require(argc == 4, "Expected scratch directory, memory core and path core"); require(SDL_Init(0), SDL_GetError());
     const auto dir = fs::path(argv[1]) / ("archive-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     fs::create_directories(dir); const auto zip = dir / "collection.ZIP";
     write_zip(zip, {{"folder/First.gbc", "ROM fixture"}, {"Second.gba", "Other ROM"}, {"readme.txt", "ignored"}});
@@ -36,10 +36,10 @@ int main(int argc, char** argv) {
     }
     rejects([&]{auto temporary = rom_archive::extract(dir / "checksum.zip", "Bad.gbc"); fs::remove_all(temporary);});
     Library library(dir / "library.sqlite3");
-    Game game{0, zip.string(), "First", "gb", bundled_core(systems()[system_index("gb")]).string()};
+    Game game{0, zip.string(), "First", "gb", argv[2]};
     game.archive_member = "folder/First.gbc"; const auto first = library.add(game);
     require(library.add(game) == first, "Repeated member import duplicated game");
-    game.archive_member = "Second.gba"; game.title = "Second"; game.system = "gba"; game.core = bundled_core(systems()[system_index("gba")]).string();
+    game.archive_member = "Second.gba"; game.title = "Second"; game.system = "gba";
     require(library.add(game) != first, "Two members share library identity");
     auto saved = library.games().front(); require(saved.save_name == "First", "Save folder used archive name");
     const auto identity = saved.save_id;
@@ -58,19 +58,19 @@ int main(int argc, char** argv) {
     changed = saved; changed.path = (dir / "missing.zip").string();
     rejects([&]{library.update(changed);});
     fs::rename(dir / "offline.zip", saved.path);
-    rejects([&]{rom_archive::validate_core(bundled_core(systems()[system_index("psp")]), dir / "core-info", "psp");});
+    rejects([&]{rom_archive::validate_core(argv[3], dir / "ineligible-core-info", "psp");});
     const auto sega_zip = dir / "sega.zip";
     write_zip(sega_zip, {{"Genesis.md", "cartridge"}, {"Master.sms", "cartridge"}, {"Gear.gg", "cartridge"}});
     for (const auto& [system, member] : {std::pair{"md", "Genesis.md"}, {"sms", "Master.sms"}, {"gg", "Gear.gg"}}) {
-        Game sega{0, sega_zip.string(), member, system, bundled_core(systems()[system_index(system)]).string()};
+        Game sega{0, sega_zip.string(), member, system, argv[2]};
         sega.archive_member = member;
         sega.id = library.add(sega);
-        require(sega.id > 0, "BlastEm ZIP cartridge was not imported");
+        require(sega.id > 0, "Sega ZIP cartridge was not imported");
         library.update(sega);
     }
-    rejects([&]{rom_archive::validate_core(bundled_core(systems()[system_index("md")]), dir / "core-info", "psp");});
+    rejects([&]{rom_archive::validate_core(argv[3], dir / "ineligible-core-info", "psp");});
     const auto custom = dir / "custom.so";
-    fs::copy_file(bundled_core(systems()[system_index("gb")]), custom);
+    fs::copy_file(argv[2], custom);
     rom_archive::validate_core(custom, dir / "core-info", "gb");
     rom_archive::validate_core(custom, dir / "core-info", "gb");
     require(std::distance(fs::directory_iterator(dir / "core-info"), fs::directory_iterator{}) == 1, "Custom core result not cached");

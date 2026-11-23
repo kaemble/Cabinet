@@ -24,7 +24,7 @@ static int trace_connection(sqlite3* db, char**, const sqlite3_api_routines*) {
 }
 int main(int argc, char** argv) {
     try {
-        require(argc == 2, "Expected scratch directory");
+        require(argc == 3, "Expected scratch directory and test core");
         fs::path dir = fs::path(argv[1]) / ("home-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
         fs::create_directories(dir);
         auto rom = dir / "A test game.gbc";
@@ -326,21 +326,32 @@ int main(int argc, char** argv) {
             fs::create_directories(profile);
             const auto zip = profile / "single.zip";
             write_zip(zip, {{"folder/Inside.gbc", "ROM fixture"}, {"Other.gba", "different system"}, {"readme.txt", "ignored"}});
+            const auto cores = profile / "cores";
+            fs::create_directories(cores);
+            fs::copy_file(argv[2], cores / "test-core.so");
+            save_storage::write(profile / "browser.conf", {{"core", cores.string()}});
             Home home(window, renderer, profile, "/unused");
+            auto finish_zip_import = [&]
+            {
+                for (int i = 0; i < 2; ++i) key(home, SDL_SCANCODE_DOWN);
+                key(home, SDL_SCANCODE_RETURN);
+                for (int i = 0; i < 100; ++i) { home.tick(); SDL_Delay(1); }
+                key(home, SDL_SCANCODE_DOWN); key(home, SDL_SCANCODE_RETURN);
+                for (int i = 0; i < 2; ++i) key(home, SDL_SCANCODE_DOWN);
+                key(home, SDL_SCANCODE_RETURN);
+            };
             home.select_system("gb");
             home.import_file(zip);
             for (int i=0;i<100;++i) { home.tick(); SDL_Delay(1); }
             home.draw();
-            for (int i=0;i<4;++i) key(home, SDL_SCANCODE_DOWN);
-            key(home, SDL_SCANCODE_RETURN);
+            finish_zip_import();
             Library inspect(profile / "library.sqlite3");
             require(inspect.games().size() == 1 && inspect.games()[0].title == "Inside" && inspect.games()[0].archive_member == "folder/Inside.gbc", "Single ROM ZIP did not auto-select and import");
             write_zip(profile / "multiple.zip", {{"First.gbc", "one"}, {"Second.gbc", "two"}});
             home.import_file(profile / "multiple.zip");
             for (int i=0;i<100;++i) { home.tick(); SDL_Delay(1); }
             home.draw(); key(home, SDL_SCANCODE_DOWN); key(home, SDL_SCANCODE_RETURN);
-            for (int i=0;i<4;++i) key(home, SDL_SCANCODE_DOWN);
-            key(home, SDL_SCANCODE_RETURN);
+            finish_zip_import();
             require(inspect.games().size() == 2 && inspect.games()[1].archive_member == "Second.gbc", "ZIP member chooser did not retain selection");
         }
         // Exercise the same edit/confirm flow used after file chooser selection.
