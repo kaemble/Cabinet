@@ -215,8 +215,9 @@ class ContainerDispatchTest(unittest.TestCase):
     def test_armada_cross_build_uses_target_sdl_and_drm(self):
         sdl, configure, compile_command = self.invoke("ArmadaOS", "cabinet")
         self.assertIn("--toolchain", sdl)
+        self.assertIn("/opt/cabinet/armadaos.cmake", sdl)
         self.assertIn("-DCABINET_ARMADA_DRM=ON", configure)
-        self.assertIn("-DCMAKE_TOOLCHAIN_FILE=/opt/cabinet/aarch64.cmake", configure)
+        self.assertIn("-DCMAKE_TOOLCHAIN_FILE=/opt/cabinet/armadaos.cmake", configure)
         self.assertIn("-DCABINET_LOCKED_CORES_DIR=/out/cores", configure)
         self.assertIn("--build", compile_command)
 
@@ -229,6 +230,7 @@ class ContainerDispatchTest(unittest.TestCase):
     def test_individual_core_is_verified_without_building_sdl(self):
         compile_command, verify = self.invoke("aarch64", "mgba")
         self.assertIn("tools/build_cores.py", compile_command)
+        self.assertIn("/opt/cabinet/aarch64.cmake", compile_command)
         self.assertEqual(compile_command[-2:], ["--core", "mgba"])
         self.assertIn("--verify", verify)
         self.assertEqual(verify[-2:], ["--core", "mgba"])
@@ -237,6 +239,17 @@ class ContainerDispatchTest(unittest.TestCase):
         compile_command, verify = self.invoke("x86_64", "cores")
         self.assertNotIn("--core", compile_command)
         self.assertNotIn("--core", verify)
+
+    def test_armada_cross_cores_use_optimized_toolchain(self):
+        for target in ("cores", "mgba", "gambatte"):
+            compile_command, verify = self.invoke("ArmadaOS", target)
+            self.assertIn("/opt/cabinet/armadaos.cmake", compile_command)
+            self.assertIn("--verify", verify)
+
+    def test_native_armada_does_not_use_cross_toolchain(self):
+        commands = self.invoke("ArmadaOS", "cabinet", "aarch64")
+        self.assertNotIn("--toolchain", commands[0])
+        self.assertFalse(any(arg.startswith("-DCMAKE_TOOLCHAIN_FILE=") for arg in commands[1]))
 
     def test_native_cabinet_checks_runtime(self):
         commands = self.invoke("aarch64", "cabinet", "aarch64")

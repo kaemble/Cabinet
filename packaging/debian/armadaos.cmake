@@ -1,0 +1,5 @@
+include("${CMAKE_CURRENT_LIST_DIR}/aarch64.cmake")
+
+set(CABINET_CORE_COMPILE_FLAGS "-O3 -march=armv8.2-a+fp16+dotprod -mtune=cortex-a78")
+set(CMAKE_C_FLAGS_RELEASE "${CABINET_CORE_COMPILE_FLAGS} -DNDEBUG" CACHE STRING "ArmadaOS C release flags" FORCE)
+set(CMAKE_CXX_FLAGS_RELEASE "${CABINET_CORE_COMPILE_FLAGS} -DNDEBUG" CACHE STRING "ArmadaOS C++ release flags" FORCE)

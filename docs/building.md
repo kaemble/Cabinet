@@ -75,6 +75,8 @@ python3 packaging/debian/build.py ArmadaOS cabinet --jobs 6
 
 On an amd64 Docker daemon, the ARM64 presets use Debian's GNU aarch64 cross compiler and `:arm64` development packages, including graphics and audio libraries. No ARM machine or host QEMU/binfmt setup is needed. On an arm64 daemon they build natively. The `x86_64` preset requires an amd64 daemon. The daemon architecture, rather than the client machine's architecture, determines the build host. Use a local Docker daemon: the checkout is bind-mounted from the client's filesystem.
 
+ArmadaOS cross-builds compile Cabinet, static SDL, and the cores with `-O3 -march=armv8.2-a+fp16+dotprod -mtune=cortex-a78`. These target-specific flags do not apply to generic `aarch64` builds, native builds, or core code generators that run on the build host.
+
 `cabinet` builds the pinned static SDL first, then `cabinet` and `cabinet-runner` in Release mode with tests disabled. It does not build cores. `sdl` builds only SDL. `cores` builds the complete locked bundle; any core name shown by `--help` builds just that core, preserving other completed cores in the bundle. A core-only build does not build SDL. The existing core builder verifies the bundle's checksums and ELF architecture. Native Cabinet builds also run the Debian runtime dependency verifier. Cross-built executables need runtime verification on Debian 13 ARM64; `ldd` on the x86 build host cannot validate them.
 
 Outputs and resumable work directories are under `release/docker/PRESET/IMAGE_ID/`. The script prints the exact path after a successful build. That directory contains:

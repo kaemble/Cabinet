@@ -21,8 +21,9 @@ def main():
     args = parser.parse_args()
     arch = "x86_64" if args.preset == "x86_64" else "aarch64"
     cross = arch != platform.machine()
-    toolchain = ["--toolchain", "/opt/cabinet/aarch64.cmake"] if cross else []
-    cmake_toolchain = ["-DCMAKE_TOOLCHAIN_FILE=/opt/cabinet/aarch64.cmake"] if cross else []
+    toolchain_path = "/opt/cabinet/armadaos.cmake" if args.preset == "ArmadaOS" else "/opt/cabinet/aarch64.cmake"
+    toolchain = ["--toolchain", toolchain_path] if cross else []
+    cmake_toolchain = [f"-DCMAKE_TOOLCHAIN_FILE={toolchain_path}"] if cross else []
     os.environ.update(HOME="/tmp", XDG_CACHE_HOME="/tmp/cabinet-cache")
     if cross:
         os.environ["PKG_CONFIG_LIBDIR"] = "/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig"

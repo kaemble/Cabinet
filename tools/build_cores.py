@@ -185,15 +185,15 @@ def make_compilers(toolchain, temporary):
     probe.mkdir()
     (probe / "CMakeLists.txt").write_text(
         'cmake_minimum_required(VERSION 3.20)\nproject(probe C CXX)\n'
-        'file(WRITE "${CMAKE_BINARY_DIR}/compilers.txt" "${CMAKE_C_COMPILER}\\n${CMAKE_CXX_COMPILER}\\n${CMAKE_AR}\\n${CMAKE_C_COMPILER_TARGET}\\n${CMAKE_C_FLAGS}\\n${CMAKE_CXX_FLAGS}\\n")\n')
+        'file(WRITE "${CMAKE_BINARY_DIR}/compilers.txt" "${CMAKE_C_COMPILER}\\n${CMAKE_CXX_COMPILER}\\n${CMAKE_AR}\\n${CMAKE_C_COMPILER_TARGET}\\n${CMAKE_C_FLAGS}\\n${CMAKE_CXX_FLAGS}\\n${CABINET_CORE_COMPILE_FLAGS}\\n")\n')
     build = probe / "build"
     run(["cmake", "-S", probe, "-B", build, f"-DCMAKE_TOOLCHAIN_FILE={toolchain}"], temporary)
-    cc, cxx, ar, target, cflags, cxxflags = (build / "compilers.txt").read_text().splitlines()
+    cc, cxx, ar, target, cflags, cxxflags, core_flags = (build / "compilers.txt").read_text().splitlines()
     # Make cores take compiler commands rather than CMake toolchains. Reject
     # target/flag-only toolchains instead of silently producing host binaries.
     if target or cflags or cxxflags:
         raise ValueError("Make core cross-builds require compiler drivers encoding the target/sysroot; flag-only toolchains are unsupported")
-    return {"CC": cc, "CXX": cxx, "AR": ar}
+    return {"CC": cc, "CXX": cxx, "AR": ar, **({"CABINET_CORE_COMPILE_FLAGS": core_flags} if core_flags else {})}
 
 
 def copy_notices(source, destination):
@@ -241,12 +241,20 @@ def build_core(name, core, arch, toolchain, compilers, cache, temporary, stage, 
         compiler = [line for line in cache_lines if re.match(r"CMAKE_(C|CXX)_COMPILER(:|_)|CMAKE_(C|CXX)_FLAGS[:_]", line)]
     else:
         options = {**core.get("make", {}), **recipe, **compilers}
+        core_flags = options.pop("CABINET_CORE_COMPILE_FLAGS", "")
+        extra_makefiles = []
+        if core_flags:
+            # Append after upstream flags without replacing required defines or PIC.
+            flags_file = temporary / "cabinet-flags.mk"
+            flags_file.write_text(f"override CFLAGS += {core_flags}\noverride CXXFLAGS += {core_flags}\n")
+            extra_makefiles = ["-f", flags_file]
+            options["CABINET_CORE_COMPILE_FLAGS"] = core_flags
         for target in core.get("prepare_targets", []):
             # Code generators execute on the build host, also during ARM cross-builds.
             run(["make", "-C", directory, "-f", core["makefile"], target,
                  "CC=" + os.environ.get("CC_FOR_BUILD", "cc"),
                  "CXX=" + os.environ.get("CXX_FOR_BUILD", "c++")], temporary)
-        command = ["make", "-C", directory, "-f", core["makefile"], f"-j{jobs}", core["target"],
+        command = ["make", "-C", directory, "-f", core["makefile"], *extra_makefiles, f"-j{jobs}", core["target"],
                    *[f"{key}={value}" for key, value in sorted(options.items())]]
         run(command, temporary)
         artifact = directory / core.get("artifact_path", core["artifact"])

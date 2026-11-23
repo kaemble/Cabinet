@@ -6,6 +6,7 @@ import platform
 import importlib.util
 import json
 import re
+import shutil
 from pathlib import Path
 import struct
 import sys
@@ -20,6 +21,61 @@ spec.loader.exec_module(cores)
 
 
 class BundleTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("aarch64-linux-gnu-gcc"), "requires the aarch64 cross compiler")
+    def test_armada_toolchain_optimizes_cmake_and_make_cores(self):
+        toolchain = ROOT / "packaging/debian/armadaos.cmake"
+        flags = "-O3 -march=armv8.2-a+fp16+dotprod -mtune=cortex-a78"
+        with tempfile.TemporaryDirectory(prefix="cabinet-armada-") as directory:
+            root = Path(directory)
+            compilers = cores.make_compilers(toolchain, root)
+            self.assertEqual(compilers["CABINET_CORE_COMPILE_FLAGS"], flags)
+            cache = (root / "compiler-probe/build/CMakeCache.txt").read_text()
+            for language in ("C", "CXX"):
+                self.assertIn(f"CMAKE_{language}_FLAGS_RELEASE:STRING={flags} -DNDEBUG", cache)
+
+            for build_system in ("cmake", "make"):
+                work = root / build_system
+                source = work / "probe/source"
+                source.mkdir(parents=True)
+                (work / "sources-ready").touch()
+                stage = work / "stage"
+                stage.mkdir()
+                for name in ("probe.c", "other.cpp"):
+                    (source / name).write_text(
+                        '#if !defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC) || !defined(__ARM_FEATURE_DOTPROD)\n'
+                        '#error Missing ArmadaOS instruction set features\n#endif\n'
+                        '#ifndef REQUIRED_UPSTREAM_DEFINE\n#error Lost upstream flags\n#endif\n'
+                        f'int {"probe" if name.endswith(".c") else "other"}(void) {{ return 1; }}\n')
+                (source / "CMakeLists.txt").write_text(
+                    'cmake_minimum_required(VERSION 3.20)\nproject(probe C CXX)\n'
+                    'add_library(probe MODULE probe.c other.cpp)\n'
+                    'target_compile_definitions(probe PRIVATE REQUIRED_UPSTREAM_DEFINE)\n'
+                    'set_target_properties(probe PROPERTIES PREFIX "")\n')
+                (source / "Makefile").write_text(
+                    'CFLAGS = -O2 -fPIC -DREQUIRED_UPSTREAM_DEFINE\n'
+                    'CXXFLAGS = -O2 -fPIC -DREQUIRED_UPSTREAM_DEFINE\n'
+                    'probe.so: probe.o other.o\n\t$(CXX) -shared $^ -o $@\n'
+                    'probe.o: probe.c\n\t$(CC) $(CFLAGS) -c $< -o $@\n'
+                    'other.o: other.cpp\n\t$(CXX) $(CXXFLAGS) -c $< -o $@\n'
+                    'hostgen:\n\t$(CC) $(CFLAGS) host.c -o hostgen\n\t./hostgen\n')
+                (source / "host.c").write_text('int main(void) { return 0; }\n')
+                recipe = dict(source_directory="source", build_system=build_system, cmake={},
+                              target="probe" if build_system == "cmake" else "probe.so",
+                              prepare_targets=["hostgen"],
+                              makefile="Makefile", artifact="probe.so", license_files=[],
+                              version="test", commit="test", repository="test", sha256="test")
+                with mock.patch.object(cores, "run", wraps=cores.run) as run:
+                    receipt = cores.build_core("probe", recipe, "aarch64", toolchain, compilers,
+                                               root / "cache", work, stage, 1, True)
+                cores.elf_check(stage / "probe.so", "aarch64")
+                if build_system == "make":
+                    self.assertEqual(receipt["options"]["CABINET_CORE_COMPILE_FLAGS"], flags)
+                    command = run.call_args.args[0]
+                    dry_run = cores.subprocess.check_output([*map(str, command), "-Bn"], text=True)
+                    for line in dry_run.splitlines():
+                        if " -c " in line:
+                            self.assertIn(f"-O2 -fPIC -DREQUIRED_UPSTREAM_DEFINE {flags} -c ", line)
+
     def test_system_catalog_is_fully_locked(self):
         lock = cores.load_lock(ROOT / "cores.lock.json")
         catalog = (ROOT / "src/library.cpp").read_text()

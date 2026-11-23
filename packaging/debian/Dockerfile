@@ -32,7 +32,7 @@ RUN rm -f /etc/apt/sources.list.d/debian.sources && \
 # SDL's GLES renderer is needed alongside desktop GL on ARM devices.
 RUN apt-get update && apt-get install -y --no-install-recommends libgles-dev:$TARGET_ARCH \
     && rm -rf /var/lib/apt/lists/*
-COPY packaging/debian/aarch64.cmake packaging/debian/run-build.py /opt/cabinet/
+COPY packaging/debian/aarch64.cmake packaging/debian/armadaos.cmake packaging/debian/run-build.py /opt/cabinet/
 RUN printf '%s\n' "$DEBIAN_SNAPSHOT" > /opt/cabinet/debian-snapshot && \
     printf '%s\n' 'debian:trixie-slim@sha256:a72b4433de1cf7d6bae0c4cee74d0547f58601a643b3375f070c51600d63b6b2' > /opt/cabinet/base-image
 ENV HOME=/tmp XDG_CACHE_HOME=/tmp/cabinet-cache
