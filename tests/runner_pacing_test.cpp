@@ -4,6 +4,7 @@
 #include <iostream>
 #include <memory>
 #include <stdexcept>
+#include <vector>
 
 static void require(bool Condition, const char* Message)
 {
@@ -67,6 +68,29 @@ static void test_pacing()
     require(Pacing.menu_deadline(Now, true) <= Now + 33 &&
         Pacing.menu_deadline(Now, false) <= Now + 1000,
         "Menu waits lost their capture cadence or periodic display check");
+
+    SDL_AudioSpec format{SDL_AUDIO_S16, 2, 48000};
+    auto* stream = SDL_CreateAudioStream(&format, &format);
+    require(stream != nullptr, SDL_GetError());
+    AudioOutput callback_audio(stream);
+    callback_audio.set_sample_rate(48000);
+    std::vector<std::int16_t> samples(48000);
+    callback_audio.submit(samples.data(), samples.size() / 2, false);
+    Settings.frame_rate = 5;
+    Settings.audio = Settings.asynchronous_audio = true;
+    Pacing.update(Settings);
+    const auto before_callback = Pacing.core_deadline();
+    Pacing.finish_core(callback_audio, 0);
+    require(std::abs(Pacing.core_deadline() - before_callback - 200000000) < 1,
+            "Callback-produced samples deferred the video clock");
+    const auto now = SDL_GetTicksNS();
+    Pacing.finish_present(now, false, now, now);
+    callback_audio.set_frequency_ratio(1.1f);
+    const auto audio_iteration = Pacing.begin_iteration(false, callback_audio, SDL_GetTicksNS() + 5000000);
+    require(audio_iteration.started < Pacing.core_deadline() && !Pacing.core_due(0),
+            "Audio wake waited for the next video frame");
+    require(SDL_GetAudioStreamFrequencyRatio(stream) == 1.0f,
+            "Callback audio received frame-based frequency correction");
 }
 
 int main()

@@ -14,6 +14,7 @@
 #include <tuple>
 #include "runner_pacing.h"
 #include "audio_output.h"
+#include "async_audio.h"
 #include "libretro_core.h"
 #include "input_router.h"
 #include "settings_store.h"
@@ -81,6 +82,7 @@ struct Session
                (secondary && (SDL_GetWindowFlags(secondary->window) & SDL_WINDOW_INPUT_FOCUS));
     }
     AudioOutput audio;
+    AsyncAudio async_audio;
     std::unique_ptr<HardwareVideo> hardware;
     std::unique_ptr<VulkanVideo> vulkan;
     bool prefer_vulkan = false;
@@ -142,6 +144,7 @@ struct Session
     }
     ~Session()
     {
+        async_audio.clear();
         frontend.stop_rumble();
         if (!saves.metadata.empty())
         {
@@ -279,6 +282,8 @@ static bool environment(unsigned command, void* data)
     {
         switch (command)
         {
+        case RETRO_ENVIRONMENT_SET_AUDIO_CALLBACK:
+            return data == nullptr;
         case RETRO_ENVIRONMENT_SET_VARIABLE:
         case RETRO_ENVIRONMENT_SET_CORE_OPTIONS_DISPLAY:
         case RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO:
@@ -294,6 +299,12 @@ static bool environment(unsigned command, void* data)
     }
     switch (command)
     {
+    case RETRO_ENVIRONMENT_SET_AUDIO_CALLBACK:
+        if (data)
+        {
+            current->async_audio.configure(*static_cast<const retro_audio_callback*>(data));
+        }
+        return true;
     case RETRO_ENVIRONMENT_SET_SERIALIZATION_QUIRKS:
     case RETRO_ENVIRONMENT_SET_SERIALIZATION_QUIRKS_2:
         if (!data)
@@ -796,6 +807,7 @@ static void set_fast_forward(Session& s, bool enabled)
     {
         return;
     }
+    s.async_audio.set_enabled(false);
     s.fast_forward = enabled;
     s.last_frame_time_ns = 0;
     s.audio.reset(true);
@@ -952,6 +964,7 @@ static std::vector<char> read_content(const fs::path& path)
 
 static void save_state(Session& s)
 {
+    s.async_audio.set_enabled(false);
     if (s.vulkan)
     {
         s.vulkan->idle();
@@ -962,6 +975,7 @@ static void save_state(Session& s)
 
 static void load_state(Session& s, const fs::path& source = {})
 {
+    s.async_audio.set_enabled(false);
     if (s.vulkan)
     {
         s.vulkan->idle();
@@ -1006,6 +1020,7 @@ static void run_core_frame(Session& session, bool core_has_run)
 {
     const bool compatible = session.frontend.runahead_option_key.empty() &&
                             session.frontend.runahead_available && !session.hardware && !session.vulkan &&
+                            !session.async_audio.registered() &&
                             !(session.serialization_quirks & RETRO_SERIALIZATION_QUIRK_INCOMPLETE);
     const unsigned ahead = compatible && !session.fast_forward && core_has_run
                                ? session.frontend.runahead_frames : 0;
@@ -1497,14 +1512,15 @@ static int run_game_session(const RunnerOptions& inherited, const RunnerOptions&
     bool menu_hint_pending = options.show_menu_hint && !options.home_shortcut && !options.stick_shortcut;
     bool load_pending = !options.load_state.empty();
     if (session.frontend.runahead_option_key.empty() &&
-        (session.hardware || session.vulkan || (session.serialization_quirks & RETRO_SERIALIZATION_QUIRK_INCOMPLETE)))
+        (session.hardware || session.vulkan || session.async_audio.registered() ||
+         (session.serialization_quirks & RETRO_SERIALIZATION_QUIRK_INCOMPLETE)))
     {
         session.frontend.runahead_available = false;
     }
     session.frame_rate = av.timing.fps;
     RunnerDiagnostics diagnostics(options.timing_stats);
     pacing.update({session.frame_rate, session.frontend.vsync, session.frontend.vrr, session.fast_forward,
-                   static_cast<bool>(session.audio)});
+                   static_cast<bool>(session.audio), session.async_audio.registered()});
     // Establish the startup controller state silently. SDL also queues ADDED
     // events for existing devices; discover() then treats those as unchanged.
     session.frontend.discover();
@@ -1570,7 +1586,7 @@ static int run_game_session(const RunnerOptions& inherited, const RunnerOptions&
             }
         }
         pacing.update({session.frame_rate, session.frontend.vsync, session.frontend.vrr, session.fast_forward,
-                       static_cast<bool>(session.audio)});
+                       static_cast<bool>(session.audio), session.async_audio.registered()});
         session.frontend.update(session.focused(), SDL_GetTicks());
         const bool fast_forward_requested =
             (session.frontend.fast_forward || session.frontend.fast_forward_held) && !session.frontend.paused();
@@ -1578,7 +1594,7 @@ static int run_game_session(const RunnerOptions& inherited, const RunnerOptions&
         {
             set_fast_forward(session, fast_forward_requested);
             pacing.update({session.frame_rate, session.frontend.vsync, session.frontend.vrr, session.fast_forward,
-                           static_cast<bool>(session.audio)});
+                           static_cast<bool>(session.audio), session.async_audio.registered()});
         }
         const bool gameplay_ready = core_has_run && session.frames > 0;
         if (menu_hint_pending && gameplay_ready)
@@ -1732,6 +1748,7 @@ static int run_game_session(const RunnerOptions& inherited, const RunnerOptions&
             break;
         }
         const bool paused = session.frontend.paused();
+        session.async_audio.set_enabled(session.core.loaded() && session.audio && !paused && !session.fast_forward);
         diagnostics.update_overlay(session.frontend.show_stats, paused, session.frontend.stats_text);
         const bool playing = session.frames > 0 && !paused;
         if (playing || session.saves.playtime.active)
@@ -1787,7 +1804,15 @@ static int run_game_session(const RunnerOptions& inherited, const RunnerOptions&
         }
         session.audio.set_volume(session.frontend.volume);
         diagnostics.begin_iteration(paused, session.frames);
-        const auto iteration = pacing.begin_iteration(paused, session.audio);
+        if (!paused && session.async_audio.registered())
+        {
+            session.async_audio.pump(session.audio, SDL_GetTicksNS());
+        }
+        const auto iteration = pacing.begin_iteration(paused, session.audio, session.async_audio.next_wake());
+        if (!paused && session.async_audio.registered())
+        {
+            session.async_audio.pump(session.audio, SDL_GetTicksNS());
+        }
         unsigned executed = 0;
         if (!paused)
         {
@@ -1799,7 +1824,7 @@ static int run_game_session(const RunnerOptions& inherited, const RunnerOptions&
             bool audio_blocked = false;
             while (pacing.core_due(executed))
             {
-                if (!session.audio.ready(session.frame_rate, session.fast_forward))
+                if (!session.async_audio.registered() && !session.audio.ready(session.frame_rate, session.fast_forward))
                 {
                     diagnostics.audio_gated();
                     audio_blocked = true;
@@ -1823,6 +1848,8 @@ static int run_game_session(const RunnerOptions& inherited, const RunnerOptions&
                 session.notify_frame_time(SDL_GetTicksNS());
                 run_core_frame(session, core_has_run);
                 core_has_run = true;
+                session.async_audio.set_enabled(session.audio && !session.fast_forward);
+                session.async_audio.pump(session.audio, SDL_GetTicksNS());
                 diagnostics.end_core(core_started);
                 ++executed;
                 pacing.finish_core(session.audio, audio_before);
@@ -1846,11 +1873,17 @@ static int run_game_session(const RunnerOptions& inherited, const RunnerOptions&
             }
             next_battery_save = SDL_GetTicks() + 10000;
         }
-        ++ticks;
         if (!session.callback_error.empty())
         {
             throw std::runtime_error(session.callback_error);
         }
+        if (!paused && !executed && session.async_audio.registered() && !force_redraw && !secondary_dirty &&
+            !pacing.present_due(SDL_GetTicksNS()))
+        {
+            diagnostics.report();
+            continue;
+        }
+        ++ticks;
         auto wait_for_menu = [&]
         {
             const auto now = SDL_GetTicks();
@@ -2023,7 +2056,7 @@ static int run_game_session(const RunnerOptions& inherited, const RunnerOptions&
         const auto presented = SDL_GetTicksNS();
         pacing.observe_present(presented, swap_started, paused);
         diagnostics.end_present(presented, present_started, executed, paused, session.frames);
-        pacing.finish_present(presented, paused, iteration.started);
+        pacing.finish_present(presented, paused, iteration.started, session.async_audio.next_wake());
         if (paused)
         {
             wait_for_menu();

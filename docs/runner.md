@@ -37,6 +37,12 @@ The runner starts fullscreen unless the system has a saved windowed preference. 
 
 Explicit command-line settings override saved preferences. See [controls](controls.md), [storage](storage.md), and [video](video.md) for configuration scope, save identity, and rendering options. Debug core logs can substantially slow emulation.
 
+## Audio callbacks
+
+The runner supports libretro's optional `RETRO_ENVIRONMENT_SET_AUDIO_CALLBACK` interface. It requests samples according to playback-buffer demand, with timed service between video frames. Audio notifications and other core calls run serially on the runner thread. Callback audio uses a 60 ms queue target and SDL's sample-rate conversion, without the queue-feedback speed correction used for frame-based audio.
+
+The producer is inactive while paused, fast-forwarding, or running without an audio device, and is stopped before save/load operations and core shutdown. Frontend run-ahead is unavailable for cores using callback audio.
+
 ## Dual-screen DS and 3DS
 
 For melonDS DS (`--system nds`) and Azahar (`--system 3ds`), `--dual-screen` places the top screen in the main window and the bottom screen in a second resizable window. The bottom window opens on another display when available. Both views share one emulation clock; only the main window controls pacing and displays menus/stats.

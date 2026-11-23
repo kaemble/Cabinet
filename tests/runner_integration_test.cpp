@@ -231,6 +231,72 @@ static void frame_time_callbacks(const fs::path& root, const std::string& core) 
     }
 }
 
+static void async_audio_callbacks(const fs::path& root, const std::string& core)
+{
+    const auto supported = root / "gambatte_libretro.so";
+    fs::create_symlink(fs::absolute(core), supported);
+    auto opts = options(root, supported.string(), {"--core-option", "cabinet_test_async_audio=enabled",
+                                   "--core-option", "cabinet_test_slow_video=enabled"});
+    opts.runahead_frames = 2;
+    const auto original_saves = core_read().saves;
+    run(opts, [&]
+    {
+        require(core_read().async_audio_accepted && core_read().async_audio_active,
+                "Callback audio registration did not activate");
+        require(core_read().saves == original_saves, "Frontend run-ahead ran with callback audio");
+        frames(1);
+        const auto before = core_read();
+        SDL_Delay(50);
+        const auto between = core_read();
+        require(between.runs == before.runs && between.async_audio_calls > before.async_audio_calls,
+                "Audio production waited for the next video frame");
+        back();
+        wait_for([] { return !core_read().async_audio_active; }, "Menu did not deactivate callback audio");
+        const auto paused = core_read();
+        SDL_Delay(100);
+        require(core_read().async_audio_calls == paused.async_audio_calls && core_read().runs == paused.runs,
+                "Paused core continued producing audio or video");
+        back();
+        wait_for([&] { return core_read().async_audio_calls > paused.async_audio_calls; },
+                 "Closing the menu did not resume callback audio");
+        const auto saves = core_read().saves;
+        press(SDL_SCANCODE_F5);
+        wait_for([&] { return core_read().saves > saves; }, "Async core could not save state");
+        frames(1);
+        const auto loads = core_read().loads;
+        press(SDL_SCANCODE_F7);
+        wait_for([&] { return core_read().loads > loads; }, "Async core could not load state");
+        frames(1);
+        key(SDL_SCANCODE_TAB);
+        wait_for([] { return core_read().fast_forward && !core_read().async_audio_active; },
+                 "Fast-forward did not deactivate callback audio");
+        const auto fast = core_read().async_audio_calls;
+        SDL_Delay(50);
+        require(core_read().async_audio_calls == fast, "Fast-forward requested callback audio");
+        key(SDL_SCANCODE_TAB, false);
+        wait_for([&] { return core_read().async_audio_calls > fast; },
+                 "Leaving fast-forward did not resume callback audio");
+        quit_game();
+    });
+    auto after = core_read();
+    require(!after.async_audio_active && !after.async_audio_after_unload && !after.async_audio_during_state,
+            "Callback audio remained active during state operations or core shutdown");
+    require(after.async_audio_enables == after.async_audio_disables, "Callback lifecycle was unbalanced");
+    for (const bool no_audio : {false, true})
+    {
+        opts.no_audio = no_audio;
+        opts.fast_forward = !no_audio;
+        opts.frames = 8;
+        const auto before = core_read();
+        require(run_game(opts) == 0, "Muted async core failed to launch");
+        SDL_Quit();
+        after = core_read();
+        require(after.async_audio_accepted && after.async_audio_calls == before.async_audio_calls &&
+                after.async_audio_enables == before.async_audio_enables && !after.async_audio_after_unload,
+                "Muted output activated callback audio");
+    }
+}
+
 static void timing_stats(const fs::path& Root, const std::string& Core)
 {
     for (const bool EnableTiming : {false, true})
@@ -597,6 +663,7 @@ int main(int argc, char** argv) {
         else if (test == "idle_menu") idle_menu(directory.path, argv[1]);
         else if (test == "timing") timing_stats(directory.path, argv[1]);
         else if (test == "frame_time") frame_time_callbacks(directory.path, argv[1]);
+        else if (test == "async_audio") async_audio_callbacks(directory.path, argv[1]);
         else if (test == "stats") stats_overlay(directory.path, argv[1], observe);
         else if (test == "restart") renderer_restart(directory.path, argv[1]);
         else if (test == "hotkeys") hotkeys(directory.path, argv[1], observe);

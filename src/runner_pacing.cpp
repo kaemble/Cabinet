@@ -51,7 +51,9 @@ void RunnerPacing::update(const Settings& requested)
         swap_probe = {};
         if (applied.vsync && !applied.fast_forward && (hertz > 0 || applied.vrr))
         {
-            const int preferred = FramePacing::preferred_swap_interval(applied.frame_rate, hertz, applied.vrr);
+            // Long swap intervals would block callback audio between video frames.
+            const int preferred = applied.asynchronous_audio
+                                      ? 1 : FramePacing::preferred_swap_interval(applied.frame_rate, hertz, applied.vrr);
             if (SDL_SetRenderVSync(renderer, preferred))
             {
                 swap_interval = preferred;
@@ -67,8 +69,9 @@ void RunnerPacing::update(const Settings& requested)
             SDL_SetRenderVSync(renderer, 0);
         }
         refresh = hertz;
-        audio_target = std::max(60.0, 3000.0 / applied.frame_rate);
-        clock.configure(applied.frame_rate, refresh, vsync, applied.vrr, applied.audio, SDL_GetTicksNS());
+        audio_target = applied.asynchronous_audio ? 60.0 : std::max(60.0, 3000.0 / applied.frame_rate);
+        clock.configure(applied.frame_rate, refresh, vsync, applied.vrr,
+                        applied.audio && !applied.asynchronous_audio, SDL_GetTicksNS());
         if (log_timing)
         {
             std::cout << "[timing] content_hz=" << applied.frame_rate << " display_hz=" << refresh << " vsync=" << vsync
@@ -87,11 +90,12 @@ void RunnerPacing::reset()
     clock.reset(SDL_GetTicksNS());
 }
 
-RunnerPacing::Iteration RunnerPacing::begin_iteration(bool paused, AudioOutput& audio)
+RunnerPacing::Iteration RunnerPacing::begin_iteration(bool paused, AudioOutput& audio, std::uint64_t audio_wake)
 {
     const double now = SDL_GetTicksNS();
-    const double wake = std::min(clock.next_core, clock.next_present);
-    if (!paused && !applied.fast_forward && clock.content_clock && wake > now)
+    const double wake = std::min({clock.next_core, clock.next_present, static_cast<double>(audio_wake)});
+    if (!paused && !applied.fast_forward &&
+        (clock.content_clock || audio_wake != std::numeric_limits<std::uint64_t>::max()) && wake > now)
     {
         SDL_DelayPrecise(static_cast<std::uint64_t>(wake - now));
     }
@@ -102,8 +106,9 @@ RunnerPacing::Iteration RunnerPacing::begin_iteration(bool paused, AudioOutput& 
         if (audio && !applied.fast_forward)
         {
             result.audio_underflow = log_timing && audio.started() && result.queued < 1;
-            audio.set_frequency_ratio(
-                clock.audio_ratio(result.queued, audio_target, (result.started - audio_check) / 1e9));
+            audio.set_frequency_ratio(applied.asynchronous_audio
+                                          ? 1.0 : clock.audio_ratio(result.queued, audio_target,
+                                                                   (result.started - audio_check) / 1e9));
         }
         audio_check = result.started;
     }
@@ -119,7 +124,7 @@ bool RunnerPacing::core_due(unsigned executed) const
 void RunnerPacing::finish_core(AudioOutput& audio, double produced_before)
 {
     clock.next_core += clock.core_period;
-    if (audio && !applied.fast_forward)
+    if (audio && !applied.fast_forward && !applied.asynchronous_audio)
     {
         clock.defer_for_audio(SDL_GetTicksNS(), audio.produced_ms() - produced_before, audio_target);
     }
@@ -133,7 +138,7 @@ void RunnerPacing::finish_core_work(AudioOutput& audio, bool audio_blocked)
     {
         clock.finish_core_work(SDL_GetTicksNS(), audio_blocked);
     }
-    if (!applied.fast_forward && audio.prime(audio_target))
+    if (!applied.fast_forward && audio.prime(audio_target) && !applied.asynchronous_audio)
     {
         clock.audio_end = SDL_GetTicksNS() + audio.queue_ms() * 1e6 / clock.speed;
     }
@@ -156,7 +161,8 @@ void RunnerPacing::observe_present(std::uint64_t presented, std::uint64_t swap_s
     if (!vsync)
     {
         SDL_SetRenderVSync(renderer, 0);
-        clock.configure(applied.frame_rate, refresh, false, applied.vrr, applied.audio, presented);
+        clock.configure(applied.frame_rate, refresh, false, applied.vrr,
+                        applied.audio && !applied.asynchronous_audio, presented);
     }
     if (log_timing)
     {
@@ -165,14 +171,16 @@ void RunnerPacing::observe_present(std::uint64_t presented, std::uint64_t swap_s
     }
 }
 
-void RunnerPacing::finish_present(std::uint64_t presented, bool paused, std::uint64_t iteration_started)
+void RunnerPacing::finish_present(std::uint64_t presented, bool paused, std::uint64_t iteration_started,
+                                 std::uint64_t audio_wake)
 {
     // Count the swap's blocking time towards the deadline; sleeping for a full
     // frame here as well would halve the rate on a blocking VSync backend.
     clock.finish_present(presented, paused, iteration_started);
-    if (!paused && !applied.fast_forward && clock.next_present > presented)
+    const double wake = std::min(clock.next_present, static_cast<double>(audio_wake));
+    if (!paused && !applied.fast_forward && wake > presented)
     {
-        SDL_DelayPrecise(static_cast<std::uint64_t>(clock.next_present - presented));
+        SDL_DelayPrecise(static_cast<std::uint64_t>(wake - presented));
     }
 }
 

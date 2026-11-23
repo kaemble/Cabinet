@@ -42,9 +42,11 @@ GL/GLES frames remain on the GPU through a shared context and texture; the core 
 
 ## Frame pacing
 
-**Advanced → VSync / VRR** applies immediately and follows system/game scope. The runner keeps native emulation speed, matching close fixed-refresh rates within 0.5% (including integer multiples) with a small audio resampling adjustment. Other refresh rates use content-rate scheduling; slower displays present the latest image while bounded catch-up preserves game speed. Unknown refresh or unavailable VSync uses timer pacing.
+**Advanced → VSync / VRR** applies immediately and follows system/game scope. With frame-based audio, the runner keeps native emulation speed, matching close fixed-refresh rates within 0.5% (including integer multiples) with a small audio resampling adjustment. Other refresh rates use content-rate scheduling; slower displays present the latest image while bounded catch-up preserves game speed. Unknown refresh or unavailable VSync uses timer pacing.
 
 Audio starts with a small primed buffer. A media clock handles cores producing several video intervals per call, while bounded resampling feedback stabilizes the queue. Pause/resume resets timing and primes audio. Fast-forward disables pacing and VSync and mutes playback without changing saved preferences.
+
+[Callback audio](runner.md#audio-callbacks) follows playback demand independently of video scheduling. It keeps native timing without queue-feedback speed correction and uses swap interval 1 to allow audio service between low-rate video frames.
 
 `--no-vsync` requests timer pacing. `--vrr` uses content-rate presentation with VSync and assumes VRR is already enabled in the display/driver/compositor; it does not enable or verify hardware VRR.
 

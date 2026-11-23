@@ -14,7 +14,7 @@ static retro_input_poll_t poll;
 static std::mutex mutex;
 static TestCoreSnapshot snapshot;
 static uint64_t value = 0;
-static bool contentless = false;
+static bool contentless = false, callback_audio = false, unloaded = false;
 #ifdef CABINET_TEST_FULLPATH
 static constexpr bool need_fullpath = true;
 #else
@@ -38,6 +38,8 @@ void retro_set_controller_port_device(unsigned, unsigned) {}
 unsigned retro_api_version() { return RETRO_API_VERSION; }
 void retro_init() {
     contentless = std::strcmp(option("cabinet_test_contentless"), "enabled") == 0;
+    callback_audio = std::strcmp(option("cabinet_test_async_audio"), "enabled") == 0;
+    unloaded = false;
     environment(RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME, &contentless);
     retro_pixel_format format = RETRO_PIXEL_FORMAT_XRGB8888;
     environment(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &format);
@@ -74,6 +76,8 @@ void retro_init() {
     } else environment(RETRO_ENVIRONMENT_SET_VARIABLES, n64 ? mupen : dolphin);
     std::lock_guard lock(mutex);
     ++snapshot.boots; value = 0;
+    snapshot.async_audio_active = snapshot.async_audio_after_unload = snapshot.async_audio_accepted = false;
+    snapshot.async_audio_during_state = false;
     std::snprintf(snapshot.resolution, sizeof(snapshot.resolution), "%s", option(!options_api.empty() ? "fixture_enum" : n64 ? "mupen64plus-43screensize" : "dolphin_efb_scale"));
     std::snprintf(snapshot.dual_core, sizeof(snapshot.dual_core), "%s", option("dolphin_main_cpu_thread"));
     std::snprintf(snapshot.renderer, sizeof(snapshot.renderer), "%s", option("mupen64plus-rdp-plugin"));
@@ -84,8 +88,32 @@ void retro_get_system_info(retro_system_info* info)
 {
     *info = {"Cabinet test core", "1", "bin", need_fullpath, false};
 }
-void retro_get_system_av_info(retro_system_av_info* info) { *info = {{8,8,8,8,1}, {60,contentless ? 0.0 : 48000.0}}; }
+void retro_get_system_av_info(retro_system_av_info* info) {
+    const auto fps = std::strcmp(option("cabinet_test_slow_video"), "enabled") == 0 ? 5.0 : 60.0;
+    *info = {{8,8,8,8,1}, {fps,contentless ? 0.0 : 48000.0}};
+}
 bool retro_load_game(const retro_game_info* game) {
+    if (callback_audio) {
+        retro_audio_callback callbacks{[] {
+            { std::lock_guard lock(mutex);
+                ++snapshot.async_audio_calls;
+                snapshot.async_audio_frames += 480;
+                snapshot.async_audio_after_unload |= unloaded || !snapshot.async_audio_active;
+            }
+            static const std::array<int16_t, 960> samples{};
+            audio(samples.data(), 480);
+        }, [](bool active) {
+            std::lock_guard lock(mutex);
+            snapshot.async_audio_after_unload |= unloaded;
+            snapshot.async_audio_active = active;
+            if (active) ++snapshot.async_audio_enables;
+            else ++snapshot.async_audio_disables;
+        }};
+        const bool available = environment(RETRO_ENVIRONMENT_SET_AUDIO_CALLBACK, nullptr);
+        const bool accepted = environment(RETRO_ENVIRONMENT_SET_AUDIO_CALLBACK, &callbacks);
+        std::lock_guard lock(mutex);
+        snapshot.async_audio_accepted = available && accepted;
+    }
     if (std::strcmp(option("cabinet_test_frame_time"), "enabled") == 0) {
         retro_frame_time_callback timing{[](retro_usec_t usec) {
             std::lock_guard lock(mutex); ++snapshot.frame_time_calls; snapshot.frame_time = usec;
@@ -112,7 +140,11 @@ bool retro_load_game(const retro_game_info* game) {
     return game->data && game->size;
 }
 bool retro_load_game_special(unsigned, const retro_game_info*, size_t) { return false; }
-void retro_unload_game() {}
+void retro_unload_game() {
+    std::lock_guard lock(mutex);
+    snapshot.async_audio_after_unload |= snapshot.async_audio_active;
+    unloaded = true;
+}
 void retro_reset() { std::lock_guard lock(mutex); ++snapshot.resets; value = 0; }
 void retro_run() {
     bool fast_forward = false;
@@ -126,17 +158,19 @@ void retro_run() {
         pixels.fill(static_cast<uint32_t>(++value) & 255); }
     video(pixels.data(), 8, 8, 8 * sizeof(uint32_t));
     std::array<int16_t, 1600> samples{};
-    audio(samples.data(), samples.size() / 2);
+    if (!callback_audio) audio(samples.data(), samples.size() / 2);
     if (observer) observer();
 }
 size_t retro_serialize_size() { return sizeof(value); }
 bool retro_serialize(void* data, size_t size) {
     if (size != sizeof(value)) return false;
-    std::lock_guard lock(mutex); std::memcpy(data, &value, size); ++snapshot.saves; return true;
+    std::lock_guard lock(mutex); snapshot.async_audio_during_state |= snapshot.async_audio_active;
+    std::memcpy(data, &value, size); ++snapshot.saves; return true;
 }
 bool retro_unserialize(const void* data, size_t size) {
     if (size != sizeof(value)) return false;
-    std::lock_guard lock(mutex); std::memcpy(&value, data, size); snapshot.loaded_value = value; ++snapshot.loads; return true;
+    std::lock_guard lock(mutex); snapshot.async_audio_during_state |= snapshot.async_audio_active;
+    std::memcpy(&value, data, size); snapshot.loaded_value = value; ++snapshot.loads; return true;
 }
 void* retro_get_memory_data(unsigned) { return nullptr; }
 size_t retro_get_memory_size(unsigned) { return 0; }

@@ -3,6 +3,7 @@
 #include "frame_pacing.h"
 #include <SDL3/SDL.h>
 #include <cstdint>
+#include <limits>
 
 class AudioOutput;
 
@@ -15,6 +16,7 @@ public:
     {
         double frame_rate = 60;
         bool vsync = true, vrr = false, fast_forward = false, audio = false;
+        bool asynchronous_audio = false;
         bool operator==(const Settings&) const = default;
     };
 
@@ -31,15 +33,21 @@ public:
     void update(const Settings& requested);
     void reset();
 
-    Iteration begin_iteration(bool paused, AudioOutput& audio);
+    Iteration begin_iteration(bool paused, AudioOutput& audio,
+                              std::uint64_t audio_wake = std::numeric_limits<std::uint64_t>::max());
     bool core_due(unsigned executed) const;
     void finish_core(AudioOutput& audio, double produced_before);
     void finish_core_work(AudioOutput& audio, bool audio_blocked);
     std::uint64_t begin_swap() const;
     void observe_present(std::uint64_t presented, std::uint64_t swap_started, bool paused);
-    void finish_present(std::uint64_t presented, bool paused, std::uint64_t iteration_started);
+    void finish_present(std::uint64_t presented, bool paused, std::uint64_t iteration_started,
+                        std::uint64_t audio_wake = std::numeric_limits<std::uint64_t>::max());
     std::uint64_t menu_deadline(std::uint64_t now, bool frame_limited) const;
 
+    bool present_due(std::uint64_t now) const
+    {
+        return now >= clock.next_present;
+    }
     double core_deadline() const
     {
         return clock.next_core;
