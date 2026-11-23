@@ -772,10 +772,13 @@ std::vector<std::string> Frontend::rows() const
         std::vector<std::string> result{"Gamepad bindings",
                                         "Keyboard bindings",
                                         "Hotkeys",
-                                        std::string("Rumble: ") + (rumble_enabled ? "on" : "off"),
-                                        "Analog stick deadzone: " + std::to_string(stick_deadzone) + "%",
-                                        "Trigger deadzone: " + std::to_string(trigger_deadzone) + "%",
-                                        "Restore system defaults"};
+                                        std::string("Rumble: ") + (rumble_enabled ? "on" : "off")};
+        if (bindings.has_analog_input())
+        {
+            result.push_back("Analog stick deadzone: " + std::to_string(stick_deadzone) + "%");
+            result.push_back("Trigger deadzone: " + std::to_string(trigger_deadzone) + "%");
+        }
+        result.push_back("Restore system defaults");
         if (bindings.system() == "wii")
         {
             result.insert(result.begin(), std::string("Controller: ") + wii_controller::labels[wii_controller]);
@@ -991,11 +994,16 @@ void Frontend::back()
         blocked = true;
     }
 }
+int Frontend::controls_row() const
+{
+    const int row = selected - (bindings.system() == "wii" ? 1 : 0);
+    return (row >= 4 && !bindings.has_analog_input()) ? row + 2 : row;
+}
 void Frontend::adjust(int direction)
 {
     if (page == Page::Controls)
     {
-        const int row = selected - (bindings.system() == "wii" ? 1 : 0);
+        const int row = controls_row();
         if (row == 4 || row == 5)
         {
             auto& deadzone = (row == 4) ? stick_deadzone : trigger_deadzone;
@@ -1209,8 +1217,7 @@ void Frontend::activate()
         break;
     case Page::Controls:
     {
-        const bool wii = bindings.system() == "wii";
-        const int row = selected - (wii ? 1 : 0);
+        const int row = controls_row();
         if (row < 0)
         {
             wii_controller = (wii_controller + 1) % wii_controller::count;
@@ -1675,7 +1682,7 @@ void Frontend::draw(SDL_Renderer* renderer, TextRenderer& font, int width, int h
                 "Return to Configuration"};
             description = (bindings.system() == "wii" && selected == 0)
                               ? "Choose the controller emulated by Dolphin"
-                              : descriptions[std::clamp(selected - (bindings.system() == "wii" ? 1 : 0), 0, 7)];
+                              : descriptions[std::clamp(controls_row(), 0, 7)];
         }
         else if (page == Page::Hotkeys)
         {

@@ -30,7 +30,7 @@ SDL-recognized gamepads work immediately; the first available pad controls playe
 | PSP / PlayStation | Cross south, Circle east, Square west, Triangle north; L/R shoulders, sticks and PS1 L2/R2/L3/R3 |
 | PC Engine | I east, II south; III west, IV north, V/VI shoulders |
 
-Digital systems also bind the left stick to D-pad directions. Analog sticks preserve magnitude outside the deadzone, and triggers report pressure. Stick and trigger deadzones are independently adjustable from 0% to 30%, defaulting to 5%. Bindings assume the cores' default control modes; changing a core's controller layout may require rebinding.
+Digital systems also bind the left stick to D-pad directions. Analog sticks preserve magnitude outside the deadzone, and triggers report pressure. For emulated controllers with analog input, stick and trigger deadzones are independently adjustable from 0% to 30%, defaulting to 5%. Bindings assume the cores' default control modes; changing a core's controller layout may require rebinding.
 
 ## Menu and hotkeys
 

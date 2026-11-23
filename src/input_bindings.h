@@ -32,6 +32,7 @@ public:
     void assign(std::size_t row, bool keyboard, int source);
     void add(std::size_t row, bool keyboard, int source);
     void reset();
+    bool has_analog_input() const;
     void copy_to(const std::filesystem::path& directory);
     // mouse_buttons is an SDL button bitmask from SDL_GetMouseState.
     InputSnapshot sample(SDL_Gamepad* pad, const bool* keys, std::uint32_t mouse_buttons = 0, int stick_deadzone = 5,

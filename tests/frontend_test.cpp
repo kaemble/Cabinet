@@ -27,8 +27,28 @@ static SDL_JoystickID attach() {
     return id;
 }
 static void tests() {
+    for (const auto* system : {"gb", "gba", "gg", "nes", "nds", "md", "sms", "saturn", "snes", "pce", "wii"})
+    {
+        Frontend ui;
+        const bool wii = std::string_view(system) == "wii";
+        ui.wii_controller = wii ? 1 : 0;
+        ui.bindings.configure(system, {}, ui.wii_controller);
+        require(!ui.bindings.has_analog_input(), "Digital controller advertises analog input");
+        ui.page = Page::Controls;
+        ui.selected = 4 + (wii ? 1 : 0);
+        key(ui, SDL_SCANCODE_RIGHT);
+        require(ui.stick_deadzone == 5 && ui.trigger_deadzone == 5, "Hidden deadzones must not be adjustable");
+        key(ui, SDL_SCANCODE_RETURN);
+        require(ui.page == Page::Confirm, "Digital controls must show Restore defaults after Rumble");
+        key(ui, SDL_SCANCODE_RETURN);
+        require(ui.page == Page::Controls, "Cancel restore must return to digital controls");
+        key(ui, SDL_SCANCODE_DOWN);
+        key(ui, SDL_SCANCODE_RETURN);
+        require(ui.page == Page::Configuration, "Digital controls Back must follow Restore defaults");
+    }
     for (const auto* system : {"gc", "wii"}) {
         Frontend ui; ui.bindings.configure(system, {});
+        require(ui.bindings.has_analog_input(), "Analog controller must advertise analog input");
         ui.page = Page::Controls;
         const int offset = std::string_view(system) == "wii" ? 1 : 0;
         ui.selected = 4 + offset;

@@ -205,6 +205,7 @@ private:
     void activate();
     void back();
     void adjust(int direction);
+    int controls_row() const;
     void confirm(Action action);
     void request_state(Action action);
     std::vector<std::string> rows() const;

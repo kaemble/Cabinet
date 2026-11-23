@@ -352,6 +352,14 @@ void InputBindings::configure(const std::string& system, const std::filesystem::
     defaults = bindings;
     load();
 }
+bool InputBindings::has_analog_input() const
+{
+    return std::any_of(defaults.begin(), defaults.end(),
+                       [](const InputBinding& binding)
+                       {
+                           return binding.target >= 16 && binding.target < 24;
+                       });
+}
 void InputBindings::configure_hotkeys(const std::string& system, const std::filesystem::path& directory)
 {
     system_id = system + "-hotkeys";
