@@ -167,6 +167,61 @@ int main(int argc, char** argv) {
                     "File browser must jump past all titles with the same letter");
         }
         {
+            const auto profile = dir / "relocation", content = profile / "content";
+            fs::create_directories(content);
+            const auto extracted = content / "A.gbc", multiple = content / "B.zip", single = content / "C.zip";
+            std::ofstream(extracted) << "ROM fixture";
+            write_zip(multiple, {{"nested/First.gbc", "first"}, {"Other.gba", "other system"}, {"Second.gbc", "second"}});
+            write_zip(single, {{"renamed/Only.gbc", "only"}});
+            Library inspect(profile / "library.sqlite3");
+            Game original{0, extracted.string(), "Original title", "gb", argv[2], true};
+            const auto id = inspect.add(original);
+            original = *inspect.game(id);
+            save_storage::write(profile / "browser.conf", {{"rom", content.string()}});
+            Home home(window, renderer, profile, "/unused");
+            home.select_system("gb");
+            key(home, SDL_SCANCODE_RIGHT);
+            key(home, SDL_SCANCODE_RETURN);
+            auto settle = [&]
+            {
+                for (int i = 0; i < 100; ++i)
+                {
+                    home.tick();
+                    SDL_Delay(1);
+                }
+            };
+            auto locate = [&](int index)
+            {
+                for (int i = 0; i < 3; ++i) key(home, SDL_SCANCODE_DOWN);
+                key(home, SDL_SCANCODE_RETURN);
+                settle();
+                for (int i = 0; i < index; ++i) key(home, SDL_SCANCODE_DOWN);
+                key(home, SDL_SCANCODE_RETURN);
+                settle();
+            };
+            locate(2);
+            require(inspect.game(id)->path == extracted, "Opening a ZIP picker changed the library");
+            key(home, SDL_SCANCODE_ESCAPE);
+            require(inspect.game(id)->archive_member.empty(), "Cancelling relocation changed the selected ROM");
+            locate(2);
+            key(home, SDL_SCANCODE_DOWN);
+            key(home, SDL_SCANCODE_RETURN);
+            auto saved = *inspect.game(id);
+            require(saved.path == multiple && saved.archive_member == "Second.gbc",
+                    "Relocating an extracted ROM into a ZIP did not select the matching member");
+            locate(3);
+            saved = *inspect.game(id);
+            require(saved.path == single && saved.archive_member == "renamed/Only.gbc",
+                    "Relocating to a single-member ZIP did not select its renamed ROM automatically");
+            locate(1);
+            saved = *inspect.game(id);
+            require(saved.path == extracted && saved.archive_member.empty(), "Relocating to an extracted ROM retained the ZIP member");
+            require(saved.id == original.id && saved.save_id == original.save_id && saved.save_name == original.save_name &&
+                        saved.title == original.title && saved.core == original.core && saved.favorite == original.favorite,
+                    "ROM relocation changed game metadata or save identity");
+            require(fs::exists(extracted) && fs::exists(multiple) && fs::exists(single), "Relocation changed original files");
+        }
+        {
             auto responsive_dir = dir / "responsive";
             fs::create_directories(responsive_dir);
             Library seed(responsive_dir / "library.sqlite3");

@@ -199,7 +199,7 @@ private:
     bool bios_for_import = false, bios_installed = false;
     std::string bios_system;
     bool editing = false, dirty = false, exit_after_discard = false;
-    BrowsePurpose purpose = BrowsePurpose::Import;
+    BrowsePurpose purpose = BrowsePurpose::Import, archive_purpose = BrowsePurpose::Import;
     fs::path folder = fs::current_path();
     save_storage::Metadata browser_folders = save_storage::read(fs::path(data_dir) / "browser.conf");
     std::vector<Entry> entries;
@@ -252,6 +252,8 @@ private:
     void remember_folder(BrowsePurpose intent, const fs::path& path);
     void read_folder(const fs::path& path);
     void choose_file(const fs::path& path);
+    void browse_archive(const fs::path& path, BrowsePurpose intent);
+    void finish_locate(const Game& changed);
     void edit_game();
     void finish_import();
     void set_system(int direction);
@@ -612,44 +614,7 @@ void Home::import_file(const fs::path& path, bool custom)
     }
     if (rom_archive::is_zip(path))
     {
-        purpose = BrowsePurpose::Archive;
-        modal = Modal::Browse;
-        folder = path;
-        browse_selected = browse_top = 0;
-        entries.clear();
-        browsing = true;
-        listing =
-            std::async(std::launch::async,
-                       [path, selected = sidebar - 3]
-                       {
-                           Listing result;
-                           try
-                           {
-                               for (const auto& member : rom_archive::members(path))
-                               {
-                                   const auto candidates = identify_systems(member);
-                                   if (std::find(candidates.begin(), candidates.end(), selected) != candidates.end())
-                                   {
-                                       result.entries.push_back({member, false});
-                                   }
-                               }
-                               std::stable_sort(result.entries.begin(), result.entries.end(),
-                                                [](const Entry& a, const Entry& b)
-                                                {
-                                                    return SDL_strcasecmp(a.path.generic_string().c_str(),
-                                                                          b.path.generic_string().c_str()) < 0;
-                                                });
-                               if (result.entries.empty())
-                               {
-                                   result.error = "ZIP contains no ROM files for the selected system.";
-                               }
-                           }
-                           catch (const std::exception& error)
-                           {
-                               result.error = error.what();
-                           }
-                           return result;
-                       });
+        browse_archive(path, BrowsePurpose::Import);
         return;
     }
     const auto candidates = identify_systems(path);
@@ -663,11 +628,66 @@ void Home::import_file(const fs::path& path, bool custom)
     choice = 0;
     folder = fs::path(draft.path).parent_path();
 }
+void Home::browse_archive(const fs::path& path, BrowsePurpose intent)
+{
+    archive_purpose = intent;
+    purpose = BrowsePurpose::Archive;
+    modal = Modal::Browse;
+    folder = path;
+    browse_selected = browse_top = 0;
+    entries.clear();
+    browsing = true;
+    listing =
+        std::async(std::launch::async,
+                   [path, selected = system_index(draft.system)]
+                   {
+                       Listing result;
+                       try
+                       {
+                           for (const auto& member : rom_archive::members(path))
+                           {
+                               const auto candidates = identify_systems(member);
+                               if (std::find(candidates.begin(), candidates.end(), selected) != candidates.end())
+                               {
+                                   result.entries.push_back({member, false});
+                               }
+                           }
+                           std::stable_sort(result.entries.begin(), result.entries.end(),
+                                            [](const Entry& a, const Entry& b)
+                                            {
+                                                return SDL_strcasecmp(a.path.generic_string().c_str(),
+                                                                      b.path.generic_string().c_str()) < 0;
+                                            });
+                           if (result.entries.empty())
+                           {
+                               result.error = "ZIP contains no ROM files for the selected system.";
+                           }
+                       }
+                       catch (const std::exception& error)
+                       {
+                           result.error = error.what();
+                       }
+                       return result;
+                   });
+}
+void Home::finish_locate(const Game& changed)
+{
+    library.update(changed);
+    refresh(changed.id);
+    modal = Modal::Details;
+    choice = 0;
+    notify("Game file located.");
+}
 void Home::choose_file(const fs::path& path)
 {
     if (purpose == BrowsePurpose::Archive)
     {
         draft.archive_member = path.generic_string();
+        if (archive_purpose == BrowsePurpose::Locate)
+        {
+            finish_locate(draft);
+            return;
+        }
         draft.title = path.stem().string();
         editing = false;
         dirty = false;
@@ -729,11 +749,14 @@ void Home::choose_file(const fs::path& path)
         }
         Game changed = *game();
         changed.path = fs::canonical(path).string();
-        library.update(changed);
-        refresh(changed.id);
-        modal = Modal::Details;
-        choice = 0;
-        notify("Game file located. Original files were not moved.");
+        if (changed.system != "generic" && rom_archive::is_zip(path))
+        {
+            draft = changed;
+            browse_archive(path, BrowsePurpose::Locate);
+            return;
+        }
+        changed.archive_member.clear();
+        finish_locate(changed);
     }
 }
 void Home::finish_import()
@@ -1004,12 +1027,13 @@ void Home::back()
     }
     if (modal == Modal::Browse)
     {
-        modal = (purpose == BrowsePurpose::Bios) ? Modal::Bios
-                : (purpose == BrowsePurpose::Core || purpose == BrowsePurpose::Content || purpose == BrowsePurpose::BoxArt) ? Modal::Edit
-                : (purpose == BrowsePurpose::Locate) ? Modal::Details
-                : (purpose == BrowsePurpose::Custom) ? Modal::Menu
+        const auto intent = (purpose == BrowsePurpose::Archive) ? archive_purpose : purpose;
+        modal = (intent == BrowsePurpose::Bios) ? Modal::Bios
+                : (intent == BrowsePurpose::Core || intent == BrowsePurpose::Content || intent == BrowsePurpose::BoxArt) ? Modal::Edit
+                : (intent == BrowsePurpose::Locate) ? Modal::Details
+                : (intent == BrowsePurpose::Custom) ? Modal::Menu
                                                      : Modal::None;
-        choice = (purpose == BrowsePurpose::BoxArt || purpose == BrowsePurpose::Content) ? 4 : 0;
+        choice = (intent == BrowsePurpose::BoxArt || intent == BrowsePurpose::Content) ? 4 : 0;
         return;
     }
     if (modal == Modal::Settings)

@@ -26,7 +26,7 @@ Home supports ZIP imports for single-file Game Boy/Color, GBA, NES, SNES, N64, D
 
 A single matching ROM is selected automatically; multiple matches open a member picker. Each member can have its own library entry, saves, and configuration. Home extracts only the selected member into a private temporary directory for play and removes it after the runner exits. The archive remains untouched.
 
-Encrypted archives, unsafe or duplicate member names, corrupt data, nested ZIPs, multi-file disc bundles, and ROMs over 512 MiB are unsupported. Locate file can relink a renamed or moved archive, but the member must retain its path within the archive. Standalone runner launches require extracted content.
+Encrypted archives, unsafe or duplicate member names, corrupt data, nested ZIPs, multi-file disc bundles, and ROMs over 512 MiB are unsupported. Locate file can switch between an extracted ROM and a ZIP archive or relink a moved archive. Choose the ROM inside the ZIP when multiple files match the game’s system; the game keeps its title, saves, and other metadata. Standalone runner launches require extracted content.
 
 ## Firmware and system assets
 
