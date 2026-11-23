@@ -8,7 +8,7 @@ Open a game's details to play, edit its title or core, mark it as a favorite, lo
 
 Choose **Edit details → Box art: choose image** to select a PNG, JPEG, or BMP cover. The editor previews the image; **Save changes** replaces the library placeholder or previous cover. Cancelling discards the selection. Cabinet stores its own PNG copy under `~/.local/share/cabinet/boxart/<game identity>.png`, preserving the aspect ratio and limiting the longest side to 1024 pixels. Moving or deleting the source image does not affect the saved cover. Title edits and ROM relocation keep the same art.
 
-The sidebar includes system counts, All games, Favorites, and Recently played. Search with **F** or the search box; Enter/Escape finishes entry and Ctrl+A clears it. The view button switches grid/list views. Games without box art use placeholders, and view/search choices last for the session.
+The sidebar includes system counts, All games, Favorites, and Recently played. Search with **F** or the search box; Enter/Escape finishes entry. Search and title fields support a movable cursor: Left/Right and Home/End move it, Shift selects text, and Ctrl+Left/Right moves by word. Backspace/Delete remove text around the cursor; holding Ctrl deletes a word. Ctrl+A selects all, and Ctrl+C/X/V copy, cut, and paste. Click to position the cursor or drag to select; long fields scroll to keep the cursor visible. The view button switches grid/list views. Games without box art use placeholders, and view/search choices last for the session.
 
 Arrows, D-pad, or left stick move focus; Enter/south selects, Escape/east goes back, and Tab switches panes. Right from the sidebar enters the grid, and Up from its first row reaches the toolbar. The layout and file browser adapt to the window size.
 

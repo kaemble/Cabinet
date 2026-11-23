@@ -1,4 +1,5 @@
 #include "home.h"
+#include "text_edit.h"
 #include "boxart.h"
 #include <cstdint>
 #include <cstddef>
@@ -14,6 +15,7 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <cmath>
 #include <filesystem>
 #include <future>
 #include <memory>
@@ -178,6 +180,11 @@ private:
     std::vector<Hit> hits;
     int sidebar = 0, selected = 0, focus = 0, toolbar = 0, first_row = 0;
     bool list_view = false, search = false, typing_title = false;
+    TextEdit text_edit;
+    float text_scroll = 0;
+    SDL_FRect text_rect{};
+    bool text_dragging = false, caret_visible = true;
+    std::uint64_t next_caret = 0;
     Modal modal = Modal::None;
     int choice = 0;
     Game draft;
@@ -230,6 +237,10 @@ private:
     void finish_import();
     void set_system(int direction);
     void stop_text();
+    void start_text(bool title);
+    void reset_caret();
+    void place_caret(const SDL_FRect& rect, float x, bool extend);
+    void draw_text_input(const SDL_FRect& rect);
     bool can_clear_search() const
     {
         return modal == Modal::None && !query.empty() && (search || (focus == 2 && toolbar == 1));
@@ -239,6 +250,8 @@ private:
         if (can_clear_search())
         {
             query.clear();
+            text_edit.begin(query);
+            reset_caret();
             refilter();
         }
     }
@@ -333,10 +346,100 @@ bool Home::discover()
     block_controller();
     return pad != nullptr;
 }
+void Home::start_text(bool title)
+{
+    typing_title = title;
+    search = !title;
+    text_edit.begin(title ? draft.title : query);
+    text_scroll = 0;
+    reset_caret();
+    SDL_StartTextInput(window);
+}
+
+void Home::reset_caret()
+{
+    caret_visible = true;
+    next_caret = SDL_GetTicks() + 500;
+    needs_redraw = true;
+}
+
 void Home::stop_text()
 {
     SDL_StopTextInput(window);
-    search = typing_title = false;
+    search = typing_title = text_dragging = false;
+    next_caret = 0;
+}
+
+void Home::place_caret(const SDL_FRect& rect, float x, bool extend)
+{
+    const auto& value = typing_title ? draft.title : query;
+    const float prefix = typing_title ? text.width("Title: ", layout.body) : 0;
+    const float offset = x - rect.x - layout.gap - prefix + text_scroll;
+    std::size_t position = 0;
+    float previous = 0;
+    while (position < value.size())
+    {
+        const auto end = TextEdit::next(value, position);
+        const float width = text.width(value.substr(0, end), layout.body);
+        if (offset < (previous + width) / 2)
+        {
+            break;
+        }
+        position = end;
+        previous = width;
+    }
+    text_edit.place(position, extend);
+    text_rect = rect;
+    reset_caret();
+}
+
+void Home::draw_text_input(const SDL_FRect& rect)
+{
+    text_rect = rect;
+    const auto& value = typing_title ? draft.title : query;
+    const auto prefix = typing_title ? std::string("Title: ") : std::string{};
+    const int size = layout.body;
+    const float y = rect.y + (rect.h - size) / 2 - size * .15f;
+    const float prefix_width = text.width(prefix, size);
+    const float left = rect.x + layout.gap + prefix_width;
+    const float width = std::max(1.0f, rect.w - layout.gap * 2 - prefix_width);
+    const float caret = text.width(value.substr(0, text_edit.position()), size);
+    const float total = text.width(value, size);
+    const auto [first, last] = text_edit.selection();
+    const float selection_start = text.width(value.substr(0, first), size);
+    const float selection_end = text.width(value.substr(0, last), size);
+    const float visible_width = std::max(1.0f, width - 2);
+    text_scroll = std::clamp(text_scroll, std::max(0.0f, caret - visible_width), caret);
+    if (first != last && selection_end - selection_start <= visible_width)
+    {
+        text_scroll = std::clamp(text_scroll, std::max(0.0f, selection_end - visible_width), selection_start);
+    }
+    text_scroll = std::min(text_scroll, std::max(0.0f, total - visible_width));
+    label(rect.x + layout.gap, y, prefix, size, ink, rect.w - layout.gap * 2);
+    const bool clipped = SDL_RenderClipEnabled(renderer);
+    SDL_Rect previous{};
+    SDL_GetRenderClipRect(renderer, &previous);
+    SDL_Rect clip{static_cast<int>(std::ceil(left)), static_cast<int>(rect.y),
+                  static_cast<int>(width), static_cast<int>(rect.h)};
+    if (clipped)
+    {
+        SDL_GetRectIntersection(&clip, &previous, &clip);
+    }
+    SDL_SetRenderClipRect(renderer, &clip);
+    if (first != last)
+    {
+        box({left + selection_start - text_scroll, y - 1, selection_end - selection_start,
+             static_cast<float>(size + 4)}, accent);
+    }
+    label(left - text_scroll, y, value, size, ink, 100000);
+    if (caret_visible)
+    {
+        box({left + caret - text_scroll, y, 1.5f, static_cast<float>(size + 2)}, ink);
+    }
+    SDL_SetRenderClipRect(renderer, clipped ? &previous : nullptr);
+    const SDL_Rect input_area{static_cast<int>(left), static_cast<int>(rect.y),
+                              static_cast<int>(width), static_cast<int>(rect.h)};
+    SDL_SetTextInputArea(window, &input_area, static_cast<int>(caret - text_scroll));
 }
 void Home::remember_folder(BrowsePurpose intent, const fs::path& path)
 {
@@ -969,8 +1072,7 @@ void Home::activate(bool with_controller)
     {
         if (choice == 0)
         {
-            typing_title = true;
-            SDL_StartTextInput(window);
+            start_text(true);
         }
         else if (choice == 1)
         {
@@ -1076,8 +1178,7 @@ void Home::activate(bool with_controller)
         }
         else if (toolbar == 1)
         {
-            search = true;
-            SDL_StartTextInput(window);
+            start_text(false);
         }
         else
         {
@@ -1101,6 +1202,7 @@ void Home::event(SDL_Event event)
     if (event.type == SDL_EVENT_WINDOW_FOCUS_LOST || event.type == SDL_EVENT_WINDOW_FOCUS_GAINED)
     {
         block_controller();
+        text_dragging = false;
     }
     switch (event.type)
     {
@@ -1166,17 +1268,19 @@ void Home::event(SDL_Event event)
     if (event.type == SDL_EVENT_TEXT_INPUT && (search || typing_title))
     {
         auto& target = search ? query : draft.title;
-        if (target.size() < 512)
+        const auto previous = target;
+        text_edit.insert(target, event.text.text);
+        reset_caret();
+        if (target != previous)
         {
-            target += event.text.text;
-        }
-        if (search)
-        {
-            refilter();
-        }
-        else
-        {
-            dirty = true;
+            if (search)
+            {
+                refilter();
+            }
+            else
+            {
+                dirty = true;
+            }
         }
     }
     if (event.type == SDL_EVENT_KEY_DOWN)
@@ -1193,26 +1297,11 @@ void Home::event(SDL_Event event)
         else if (search || typing_title)
         {
             auto& target = search ? query : draft.title;
-            if (key == SDL_SCANCODE_BACKSPACE && !target.empty())
+            const auto previous = target;
+            text_edit.key(target, event.key);
+            reset_caret();
+            if (target != previous)
             {
-                std::size_t i = target.size() - 1;
-                while (i && (static_cast<unsigned char>(target[i]) & 0xc0) == 0x80)
-                {
-                    --i;
-                }
-                target.erase(i);
-                if (search)
-                {
-                    refilter();
-                }
-                else
-                {
-                    dirty = true;
-                }
-            }
-            if ((event.key.mod & SDL_KMOD_CTRL) && key == SDL_SCANCODE_A)
-            {
-                target.clear();
                 if (search)
                 {
                     refilter();
@@ -1251,8 +1340,7 @@ void Home::event(SDL_Event event)
             }
             if (key == SDL_SCANCODE_F && modal == Modal::None)
             {
-                search = true;
-                SDL_StartTextInput(window);
+                start_text(false);
             }
         }
     }
@@ -1285,6 +1373,15 @@ void Home::event(SDL_Event event)
             }
         }
     }
+    if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_LEFT)
+    {
+        text_dragging = false;
+    }
+    if (event.type == SDL_EVENT_MOUSE_MOTION && text_dragging && (search || typing_title))
+    {
+        SDL_ConvertEventToRenderCoordinates(renderer, &event);
+        place_caret(text_rect, event.motion.x, true);
+    }
     if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_LEFT)
     {
         SDL_ConvertEventToRenderCoordinates(renderer, &event);
@@ -1310,16 +1407,40 @@ void Home::event(SDL_Event event)
                 }
                 if (kind == 2)
                 {
-                    stop_text();
                     toolbar = index;
                     focus = 2;
-                    activate();
+                    if (index == 1)
+                    {
+                        if (!search)
+                        {
+                            start_text(false);
+                        }
+                        place_caret(it->rect, point.x, SDL_GetModState() & SDL_KMOD_SHIFT);
+                        text_dragging = true;
+                    }
+                    else
+                    {
+                        stop_text();
+                        activate();
+                    }
                 }
                 if (kind == 3)
                 {
-                    stop_text();
                     choice = index;
-                    activate();
+                    if (modal == Modal::Edit && index == 0)
+                    {
+                        if (!typing_title)
+                        {
+                            start_text(true);
+                        }
+                        place_caret(it->rect, point.x, SDL_GetModState() & SDL_KMOD_SHIFT);
+                        text_dragging = true;
+                    }
+                    else
+                    {
+                        stop_text();
+                        activate();
+                    }
                 }
                 if (kind == 4)
                 {
@@ -1382,6 +1503,10 @@ int Home::wait_timeout() const
         sooner(focused ? 100 : 500);
     }
     const auto now = SDL_GetTicks();
+    if (focused && (search || typing_title))
+    {
+        sooner(next_caret > now ? static_cast<int>(next_caret - now) : 0);
+    }
     if (focused && repeat_direction)
     {
         sooner((repeat_at > now) ? static_cast<int>(repeat_at - now) : 0);
@@ -1395,6 +1520,13 @@ int Home::wait_timeout() const
 
 void Home::tick()
 {
+    if ((search || typing_title) && (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) &&
+        SDL_GetTicks() >= next_caret)
+    {
+        caret_visible = !caret_visible;
+        next_caret = SDL_GetTicks() + 500;
+        needs_redraw = true;
+    }
     if (message_until && SDL_GetTicks() >= message_until)
     {
         message_until = 0;
@@ -1540,8 +1672,15 @@ void Home::button(SDL_FRect rect, const std::string& title, bool active, int kin
     {
         text.icon(rect.x + layout.gap, rect.y + (rect.h - icon_size) / 2, icon_size, icon);
     }
-    label(rect.x + layout.gap + inset, rect.y + (rect.h - size) / 2 - size * .15f, title, size, color,
-          rect.w - inset - ((kind == 0 && index >= 3) ? layout.gap * 3 : layout.gap * 2));
+    if ((kind == 2 && index == 1 && search) || (kind == 3 && index == 0 && typing_title))
+    {
+        draw_text_input(rect);
+    }
+    else
+    {
+        label(rect.x + layout.gap + inset, rect.y + (rect.h - size) / 2 - size * .15f, title, size, color,
+              rect.w - inset - ((kind == 0 && index >= 3) ? layout.gap * 3 : layout.gap * 2));
+    }
     hits.push_back({rect, kind, index});
 }
 
@@ -1688,9 +1827,7 @@ void Home::draw()
     const float toolbar_y = l.gap * 2 + l.header_height;
     const float view_size = l.toolbar_height;
     button({l.left, toolbar_y, l.content - view_size - l.gap, l.toolbar_height},
-           search          ? query + "|"
-           : query.empty() ? "Search..."
-                           : query,
+           query.empty() ? "Search..." : query,
            search || (focus == 2 && toolbar == 1), 2, 1);
     {
         const int view = list_view ? 0 : 1;
@@ -2055,10 +2192,6 @@ void Home::draw_modal()
     for (std::size_t i = 0; i < rows.size(); ++i)
     {
         std::string value = rows[i];
-        if (typing_title && i == 0)
-        {
-            value += "|";
-        }
         const float rows_top = (modal == Modal::Details) ? 236.0f : 200.0f;
         button({x, rows_top + static_cast<float>(i) * 50, inner, 38}, value, choice == static_cast<int>(i), 3,
                static_cast<int>(i));
@@ -2066,7 +2199,7 @@ void Home::draw_modal()
     if (modal == Modal::Edit)
     {
         line(dh - 38,
-             typing_title ? "Type a title. Ctrl+A clears. Enter finishes."
+             typing_title ? "Arrows move. Shift selects. Ctrl+A selects all. Enter finishes."
                           : "System: Left / Right to change. Core: select to browse.",
              13, muted);
     }

@@ -417,6 +417,97 @@ int main(int argc, char** argv) {
             SDL_DestroySurface(preview);
             SDL_SetWindowSize(window, 1200, 800);
         }
+        {
+            SDL_SetWindowSize(window, 1200, 800);
+            const auto profile = dir / "text-edit-profile";
+            Library seed(profile / "library.sqlite3");
+            const auto id = seed.add({0, rom.string(), "Alpha βeta", "gb", bundled_core(systems()[system_index("gb")]).string()});
+            Home home(window, renderer, profile, "/unused");
+            home.select_system("gb");
+            key(home, SDL_SCANCODE_RIGHT); key(home, SDL_SCANCODE_RETURN);
+            key(home, SDL_SCANCODE_DOWN); key(home, SDL_SCANCODE_RETURN);
+            key(home, SDL_SCANCODE_RETURN);
+            key(home, SDL_SCANCODE_HOME); type(home, "New ");
+            key(home, SDL_SCANCODE_END); key(home, SDL_SCANCODE_BACKSPACE, SDL_KMOD_CTRL);
+            type(home, "世界");
+            key(home, SDL_SCANCODE_HOME); key(home, SDL_SCANCODE_RIGHT, SDL_KMOD_CTRL);
+            key(home, SDL_SCANCODE_DELETE, SDL_KMOD_CTRL);
+            home.draw();
+            auto* screen = SDL_RenderReadPixels(renderer, nullptr);
+            require(screen && SDL_SaveBMP(screen, (dir / "text-cursor-title.bmp").c_str()), SDL_GetError());
+            SDL_DestroySurface(screen);
+            key(home, SDL_SCANCODE_RETURN);
+            for (int i = 0; i < 5; ++i) key(home, SDL_SCANCODE_DOWN);
+            key(home, SDL_SCANCODE_RETURN);
+            require(seed.game(id)->title == "New 世界", "Title cursor editing did not save the expected Unicode text");
+            key(home, SDL_SCANCODE_ESCAPE);
+            key(home, SDL_SCANCODE_F); type(home, "abcdef");
+            for (int i = 0; i < 3; ++i) key(home, SDL_SCANCODE_LEFT);
+            type(home, "X");
+            auto copied = [&]
+            {
+                key(home, SDL_SCANCODE_A, SDL_KMOD_CTRL);
+                key(home, SDL_SCANCODE_C, SDL_KMOD_CTRL);
+                auto* value = SDL_GetClipboardText();
+                require(value, SDL_GetError());
+                const std::string result(value);
+                SDL_free(value);
+                return result;
+            };
+            require(copied() == "abcXdef", "Search did not insert at its cursor");
+            key(home, SDL_SCANCODE_HOME);
+            home.draw();
+            TextRenderer measure(renderer);
+            const float left = home.layout.left + home.layout.gap;
+            const float y = home.layout.gap * 2 + home.layout.header_height + home.layout.toolbar_height / 2;
+            auto click = [&](float x)
+            {
+                SDL_Event event{};
+                event.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+                event.button.button = SDL_BUTTON_LEFT;
+                event.button.x = x; event.button.y = y;
+                home.event(event);
+            };
+            click(left + measure.width("abcX", home.layout.body));
+            type(home, "!");
+            require(copied() == "abcX!def", "Mouse click did not position the search cursor");
+            key(home, SDL_SCANCODE_HOME);
+            home.draw();
+            click(left);
+            SDL_Event motion{}; motion.type = SDL_EVENT_MOUSE_MOTION;
+            motion.motion.x = left + measure.width("abc", home.layout.body); motion.motion.y = y;
+            home.event(motion);
+            SDL_Event release{}; release.type = SDL_EVENT_MOUSE_BUTTON_UP; release.button.button = SDL_BUTTON_LEFT;
+            home.event(release);
+            key(home, SDL_SCANCODE_X, SDL_KMOD_CTRL);
+            require(copied() == "X!def", "Dragging did not select text for cutting");
+            const std::string long_query(200, 'x');
+            type(home, long_query.c_str());
+            key(home, SDL_SCANCODE_END);
+            home.draw();
+            key(home, SDL_SCANCODE_HOME);
+            home.draw();
+            click(left); home.event(release);
+            type(home, "start");
+            require(copied() == "start" + long_query, "Long-field scrolling did not track the cursor");
+            key(home, SDL_SCANCODE_END);
+            for (int i = 0; i < 5; ++i) key(home, SDL_SCANCODE_LEFT, SDL_KMOD_SHIFT);
+            home.draw();
+            screen = SDL_RenderReadPixels(renderer, nullptr);
+            require(screen, SDL_GetError());
+            bool highlighted = false;
+            const int right = static_cast<int>(home.layout.width - home.layout.gap * 3 - home.layout.toolbar_height);
+            for (int x = right - 80; x < right - 5; ++x)
+            {
+                SDL_Color color{};
+                require(SDL_ReadSurfacePixel(screen, x, static_cast<int>(y),
+                                             &color.r, &color.g, &color.b, &color.a), SDL_GetError());
+                highlighted = highlighted || (color.r == accent.r && color.g == accent.g && color.b == accent.b);
+            }
+            require(highlighted, "A short selection at the end of a long field must remain visible");
+            require(screen && SDL_SaveBMP(screen, (dir / "text-cursor-search.bmp").c_str()), SDL_GetError());
+            SDL_DestroySurface(screen);
+        }
         SDL_DestroyRenderer(renderer); SDL_DestroyWindow(window); SDL_Quit();
         std::cout << "Home import, edit, favorite, duplicate, and removal UI checks passed\n";
         return 0;
