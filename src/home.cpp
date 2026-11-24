@@ -1,4 +1,5 @@
 #include "home.h"
+#include "file_browser.h"
 #include "text_edit.h"
 #include "boxart.h"
 #include "steamgriddb.h"
@@ -41,27 +42,6 @@ enum class Modal
     Remove,
     Discard
 };
-enum class BrowsePurpose
-{
-    Import,
-    Custom,
-    Content,
-    Locate,
-    Core,
-    Bios,
-    Archive,
-    BoxArt
-};
-struct Entry
-{
-    fs::path path;
-    bool directory;
-};
-struct Listing
-{
-    std::vector<Entry> entries;
-    std::string error;
-};
 struct Hit
 {
     SDL_FRect rect;
@@ -96,32 +76,6 @@ std::string format_playtime(std::int64_t seconds)
     return result;
 }
 
-const char* browser_folder_key(BrowsePurpose purpose)
-{
-    if (purpose == BrowsePurpose::BoxArt)
-    {
-        return "boxart";
-    }
-    if (purpose == BrowsePurpose::Core || purpose == BrowsePurpose::Custom)
-    {
-        return "core";
-    }
-    if (purpose == BrowsePurpose::Import || purpose == BrowsePurpose::Content || purpose == BrowsePurpose::Locate)
-    {
-        return "rom";
-    }
-    return nullptr;
-}
-
-std::string browser_initial(const Entry& entry, BrowsePurpose purpose)
-{
-    const auto name =
-        (purpose == BrowsePurpose::Archive) ? entry.path.generic_string() : entry.path.filename().string();
-    const char* end = name.c_str();
-    SDL_StepUTF8(&end, nullptr);
-    return std::string(name.c_str(), end);
-}
-
 class Home
 {
 public:
@@ -129,7 +83,7 @@ public:
          HomeLogger logger = {}, SteamGridDB::Request artwork_request = {})
         : window(window), renderer(renderer), text(renderer), grid_titles(renderer, TextRenderer::Font::Condensed),
           boxart(renderer, data), library(data / "library.sqlite3"), process(logger), logger(logger), executable(std::move(executable)),
-          data_dir(data.string())
+          data_dir(data.string()), browser(data, logger)
     {
         this->artwork_request = std::move(artwork_request);
         const auto credentials = save_storage::read(data / "steamgriddb" / "key.conf");
@@ -231,13 +185,7 @@ private:
     bool bios_for_import = false, bios_installed = false;
     std::string bios_system;
     bool editing = false, dirty = false, exit_after_discard = false;
-    BrowsePurpose purpose = BrowsePurpose::Import, archive_purpose = BrowsePurpose::Import;
-    fs::path folder = fs::current_path();
-    save_storage::Metadata browser_folders = save_storage::read(fs::path(data_dir) / "browser.conf");
-    std::vector<Entry> entries;
-    std::future<Listing> listing;
-    bool browsing = false;
-    int browse_selected = 0, browse_top = 0;
+    FileBrowser browser;
     float sidebar_scroll = 0;
     int sidebar_tracked = -1;
     float sidebar_view_height = 0;
@@ -281,8 +229,6 @@ private:
         return static_cast<int>(systems().size()) - (custom ? 0 : 1);
     }
     void start_browse(BrowsePurpose intent);
-    void remember_folder(BrowsePurpose intent, const fs::path& path);
-    void read_folder(const fs::path& path);
     void choose_file(const fs::path& path);
     void browse_archive(const fs::path& path, BrowsePurpose intent);
     void finish_locate(const Game& changed);
@@ -499,82 +445,9 @@ void Home::draw_text_input(const SDL_FRect& rect)
                               static_cast<int>(width), static_cast<int>(rect.h)};
     SDL_SetTextInputArea(window, &input_area, static_cast<int>(caret - text_scroll));
 }
-void Home::remember_folder(BrowsePurpose intent, const fs::path& path)
-{
-    if (const auto* key = browser_folder_key(intent); key && browser_folders[key] != path.string())
-    {
-        std::error_code ec;
-        if (fs::is_directory(path, ec))
-        {
-            browser_folders[key] = path.string();
-            try
-            {
-                save_storage::write(fs::path(data_dir) / "browser.conf", browser_folders);
-            }
-            catch (const std::exception& error)
-            {
-                logger.write(HomeLogLevel::Warn, error.what());
-            }
-        }
-    }
-}
-void Home::read_folder(const fs::path& path)
-{
-    if (browsing)
-    {
-        return;
-    }
-    folder = path;
-    browsing = true;
-    browse_selected = browse_top = 0;
-    entries.clear();
-    remember_folder(purpose, path);
-    listing = std::async(
-        std::launch::async,
-        [path, images_only = purpose == BrowsePurpose::BoxArt]
-        {
-            Listing result;
-            try
-            {
-                if (path.has_parent_path() && path.parent_path() != path)
-                {
-                    result.entries.push_back({path.parent_path(), true});
-                }
-                auto begin = result.entries.size();
-                for (const auto& entry : fs::directory_iterator(path, fs::directory_options::skip_permission_denied))
-                {
-                    std::error_code ec;
-                    if (entry.is_directory(ec) || (entry.is_regular_file(ec) && (!images_only || boxart_image(entry.path()))))
-                    {
-                        result.entries.push_back({entry.path(), entry.is_directory(ec)});
-                    }
-                    if (result.entries.size() >= 5000)
-                    {
-                        result.error = "Showing the first 5,000 entries. Choose a smaller folder.";
-                        break;
-                    }
-                }
-                std::sort(result.entries.begin() + static_cast<std::ptrdiff_t>(begin), result.entries.end(),
-                          [](const Entry& a, const Entry& b)
-                          {
-                              if (a.directory != b.directory)
-                              {
-                                  return a.directory;
-                              }
-                              return SDL_strcasecmp(a.path.filename().string().c_str(),
-                                                    b.path.filename().string().c_str()) < 0;
-                          });
-            }
-            catch (const std::exception& error)
-            {
-                result.error = error.what();
-            }
-            return result;
-        });
-}
 void Home::start_browse(BrowsePurpose intent)
 {
-    if (browsing)
+    if (browser.loading())
     {
         return;
     }
@@ -584,31 +457,8 @@ void Home::start_browse(BrowsePurpose intent)
         return;
     }
     stop_text();
-    purpose = intent;
     modal = Modal::Browse;
-    auto start = folder;
-    if (intent == BrowsePurpose::Import)
-    {
-        start = fs::current_path();
-    }
-    if (intent == BrowsePurpose::Core && !draft.core.empty())
-    {
-        start = fs::path(draft.core).parent_path();
-    }
-    if (const auto* key = browser_folder_key(intent); key && browser_folders.contains(key))
-    {
-        std::error_code ec;
-        if (fs::is_directory(browser_folders.at(key), ec))
-        {
-            start = browser_folders.at(key);
-        }
-    }
-    std::error_code ec;
-    if (!fs::is_directory(start, ec))
-    {
-        start = fs::current_path();
-    }
-    read_folder(start);
+    browser.start(intent, draft.core);
 }
 void Home::select_system(const std::string& id)
 {
@@ -640,14 +490,14 @@ void Home::import_file(const fs::path& path, bool custom)
     const auto& selected_system = systems()[custom ? system_index("generic") : sidebar - 3];
     draft.system = selected_system.id;
     draft.core = bundled_core(selected_system).string();
-    remember_folder(BrowsePurpose::Import, fs::path(draft.path).parent_path());
+    browser.remember_folder(BrowsePurpose::Import, fs::path(draft.path).parent_path());
     if (draft.system == "generic")
     {
         editing = false;
         dirty = false;
         modal = Modal::Edit;
         choice = 2;
-        folder = fs::path(draft.path).parent_path();
+        browser.set_folder(fs::path(draft.path).parent_path());
         import_artwork();
         return;
     }
@@ -665,50 +515,13 @@ void Home::import_file(const fs::path& path, bool custom)
     dirty = false;
     modal = Modal::Edit;
     choice = 0;
-    folder = fs::path(draft.path).parent_path();
+    browser.set_folder(fs::path(draft.path).parent_path());
     import_artwork();
 }
 void Home::browse_archive(const fs::path& path, BrowsePurpose intent)
 {
-    archive_purpose = intent;
-    purpose = BrowsePurpose::Archive;
     modal = Modal::Browse;
-    folder = path;
-    browse_selected = browse_top = 0;
-    entries.clear();
-    browsing = true;
-    listing =
-        std::async(std::launch::async,
-                   [path, selected = system_index(draft.system)]
-                   {
-                       Listing result;
-                       try
-                       {
-                           for (const auto& member : rom_archive::members(path))
-                           {
-                               const auto candidates = identify_systems(member);
-                               if (std::find(candidates.begin(), candidates.end(), selected) != candidates.end())
-                               {
-                                   result.entries.push_back({member, false});
-                               }
-                           }
-                           std::stable_sort(result.entries.begin(), result.entries.end(),
-                                            [](const Entry& a, const Entry& b)
-                                            {
-                                                return SDL_strcasecmp(a.path.generic_string().c_str(),
-                                                                      b.path.generic_string().c_str()) < 0;
-                                            });
-                           if (result.entries.empty())
-                           {
-                               result.error = "ZIP contains no ROM files for the selected system.";
-                           }
-                       }
-                       catch (const std::exception& error)
-                       {
-                           result.error = error.what();
-                       }
-                       return result;
-                   });
+    browser.browse_archive(path, intent, draft.system);
 }
 void Home::finish_locate(const Game& changed)
 {
@@ -720,10 +533,10 @@ void Home::finish_locate(const Game& changed)
 }
 void Home::choose_file(const fs::path& path)
 {
-    if (purpose == BrowsePurpose::Archive)
+    if (browser.purpose() == BrowsePurpose::Archive)
     {
         draft.archive_member = path.generic_string();
-        if (archive_purpose == BrowsePurpose::Locate)
+        if (browser.intent() == BrowsePurpose::Locate)
         {
             finish_locate(draft);
             return;
@@ -733,10 +546,10 @@ void Home::choose_file(const fs::path& path)
         dirty = false;
         modal = Modal::Edit;
         choice = 0;
-        folder = fs::path(draft.path).parent_path();
+        browser.set_folder(fs::path(draft.path).parent_path());
         import_artwork();
     }
-    else if (purpose == BrowsePurpose::Bios)
+    else if (browser.purpose() == BrowsePurpose::Bios)
     {
         const auto result = install_bios(bios_system, path, fs::path(data_dir) / "system");
         bios_installed = true;
@@ -744,11 +557,11 @@ void Home::choose_file(const fs::path& path)
         choice = 1;
         notify(result);
     }
-    else if (purpose == BrowsePurpose::Import)
+    else if (browser.purpose() == BrowsePurpose::Import)
     {
         import_file(path);
     }
-    else if (purpose == BrowsePurpose::Custom)
+    else if (browser.purpose() == BrowsePurpose::Custom)
     {
         ++artwork_generation;
         queued_artwork.clear();
@@ -763,7 +576,7 @@ void Home::choose_file(const fs::path& path)
         choice = 4;
         import_artwork();
     }
-    else if (purpose == BrowsePurpose::Content)
+    else if (browser.purpose() == BrowsePurpose::Content)
     {
         draft.path = fs::canonical(path).string();
         draft.title = path.stem().string();
@@ -772,7 +585,7 @@ void Home::choose_file(const fs::path& path)
         choice = api_key.empty() ? 5 : 6;
         import_artwork();
     }
-    else if (purpose == BrowsePurpose::BoxArt)
+    else if (browser.purpose() == BrowsePurpose::BoxArt)
     {
         ++artwork_generation;
         queued_artwork.clear();
@@ -781,7 +594,7 @@ void Home::choose_file(const fs::path& path)
         modal = Modal::Edit;
         choice = 4;
     }
-    else if (purpose == BrowsePurpose::Core)
+    else if (browser.purpose() == BrowsePurpose::Core)
     {
         draft.core = fs::canonical(path).string();
         dirty = true;
@@ -1023,47 +836,7 @@ void Home::navigate(int dx, int dy)
     }
     if (modal == Modal::Browse)
     {
-        if (dy && !entries.empty())
-        {
-            browse_selected = std::clamp(browse_selected + dy, 0, static_cast<int>(entries.size()) - 1);
-        }
-        if (dx && !entries.empty())
-        {
-            auto same_group = [&](int a, int b)
-            {
-                return entries[a].directory == entries[b].directory &&
-                       SDL_strcasecmp(browser_initial(entries[a], purpose).c_str(),
-                                      browser_initial(entries[b], purpose).c_str()) == 0;
-            };
-            int next = browse_selected;
-            if (dx > 0)
-            {
-                while (next < static_cast<int>(entries.size()) && same_group(browse_selected, next))
-                {
-                    ++next;
-                }
-                if (next < static_cast<int>(entries.size()))
-                {
-                    browse_selected = next;
-                }
-            }
-            else
-            {
-                while (next > 0 && same_group(browse_selected, next - 1))
-                {
-                    --next;
-                }
-                if (next > 0)
-                {
-                    --next;
-                }
-                while (next > 0 && same_group(next, next - 1))
-                {
-                    --next;
-                }
-                browse_selected = next;
-            }
-        }
+        browser.navigate(dx, dy);
         return;
     }
     if (modal != Modal::None)
@@ -1158,7 +931,7 @@ void Home::back()
     }
     if (modal == Modal::Browse)
     {
-        const auto intent = (purpose == BrowsePurpose::Archive) ? archive_purpose : purpose;
+        const auto intent = browser.intent();
         modal = (intent == BrowsePurpose::Bios) ? Modal::Bios
                 : (intent == BrowsePurpose::Core || intent == BrowsePurpose::Content || intent == BrowsePurpose::BoxArt) ? Modal::Edit
                 : (intent == BrowsePurpose::Locate) ? Modal::Details
@@ -1387,14 +1160,14 @@ void Home::activate(bool with_controller)
     }
     if (modal == Modal::Browse)
     {
-        if (browsing || entries.empty())
+        if (browser.loading() || browser.items().empty())
         {
             return;
         }
-        const auto entry = entries[browse_selected];
+        const auto entry = browser.items()[browser.selected()];
         if (entry.directory)
         {
-            read_folder(entry.path);
+            browser.read_folder(entry.path);
         }
         else
         {
@@ -1551,7 +1324,7 @@ void Home::activate(bool with_controller)
         }
         else if (choice == 3)
         {
-            folder = fs::path(game()->path).parent_path();
+            browser.set_folder(fs::path(game()->path).parent_path());
             start_browse(BrowsePurpose::Locate);
         }
         else if (choice == 4)
@@ -1853,7 +1626,7 @@ void Home::event(SDL_Event event)
                 }
                 if (kind == 4)
                 {
-                    browse_selected = index;
+                    browser.select(index);
                     activate();
                 }
                 if (kind == 5)
@@ -1907,7 +1680,7 @@ int Home::wait_timeout() const
             timeout = delay;
         }
     };
-    if (browsing || artwork_task.valid() || !queued_artwork.empty())
+    if (browser.loading() || artwork_task.valid() || !queued_artwork.empty())
     {
         sooner(50);
     }
@@ -1994,20 +1767,18 @@ void Home::tick()
         message_until = 0;
         needs_redraw = true;
     }
-    if (browsing && listing.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready)
+    if (const auto error = browser.poll())
     {
         needs_redraw = true;
-        auto result = listing.get();
-        entries = std::move(result.entries);
-        browsing = false;
-        if (!result.error.empty())
+        if (!error->empty())
         {
-            notify(result.error);
-            logger.write(HomeLogLevel::Warn, result.error);
+            notify(*error);
+            logger.write(HomeLogLevel::Warn, *error);
         }
-        if (purpose == BrowsePurpose::Archive && modal == Modal::Browse && entries.size() == 1 && result.error.empty())
+        if (browser.purpose() == BrowsePurpose::Archive && modal == Modal::Browse &&
+            browser.items().size() == 1 && error->empty())
         {
-            choose_file(entries[0].path);
+            choose_file(browser.items()[0].path);
         }
     }
     if (process.active())
@@ -2546,6 +2317,7 @@ void Home::draw()
 void Home::draw_modal()
 {
     hits.clear();
+    const auto purpose = browser.purpose();
     const float available_height = layout.height - layout.bar_height - layout.gap * 2;
     const bool editing_details = modal == Modal::Edit && (editing || draft.system == "generic" || !api_key.empty());
     const float editor_height = api_key.empty() ? 640.0f : 720.0f;
@@ -2594,12 +2366,14 @@ void Home::draw_modal()
 
     if (modal == Modal::Browse)
     {
+        const auto& folder = browser.current_folder();
+        const auto& entries = browser.items();
         line(78, folder.string(), 13, muted);
         if (purpose == BrowsePurpose::BoxArt)
         {
             line(104, "PNG, JPEG, or BMP. The image is copied when you save changes.", 13, muted);
         }
-        if (browsing)
+        if (browser.loading())
         {
             line(128, (purpose == BrowsePurpose::Archive) ? "Reading ZIP..." : "Reading folder...", 16, muted);
         }
@@ -2609,22 +2383,15 @@ void Home::draw_modal()
                  16, muted);
         }
         const int browser_rows = std::max(1, static_cast<int>((dh - 178) / 50));
-        if (browse_selected < browse_top)
-        {
-            browse_top = browse_selected;
-        }
-        if (browse_selected >= browse_top + browser_rows)
-        {
-            browse_top = browse_selected - browser_rows + 1;
-        }
-        for (int i = browse_top; i < static_cast<int>(entries.size()) && i < browse_top + browser_rows; ++i)
+        browser.scroll_into_view(browser_rows);
+        for (int i = browser.top(); i < static_cast<int>(entries.size()) && i < browser.top() + browser_rows; ++i)
         {
             const auto& entry = entries[i];
             const bool parent = entry.directory && entry.path == folder.parent_path();
             auto name = (purpose == BrowsePurpose::Archive) ? entry.path.generic_string()
                         : parent                            ? ".. (parent folder)"
                                                             : entry.path.filename().string();
-            button({x, 114.0f + (i - browse_top) * 50, inner, 38}, name, i == browse_selected, 4, i,
+            button({x, 114.0f + (i - browser.top()) * 50, inner, 38}, name, i == browser.selected(), 4, i,
                    entry.directory ? (parent ? "folder_open" : "folder") : "");
         }
         line(dh - 38, swap_confirm_cancel
