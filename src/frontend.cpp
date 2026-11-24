@@ -1221,6 +1221,10 @@ void Frontend::activate()
         }
         else if (selected >= 0 && selected < static_cast<int>(shaders.effects.size()))
         {
+            if (!shaders.effects[selected].enabled)
+            {
+                break;
+            }
             shader_selection = selected;
             page = Page::ShaderParameters;
             selected = 0;
@@ -1803,15 +1807,7 @@ void Frontend::draw(SDL_Renderer* renderer, TextRenderer& font, int width, int h
             mouse_targets.push_back({{left - body, y, w - margin - left + body, row_height}, i});
             if (i == selected)
             {
-                if (shader_move)
-                {
-                    font.icon(left - body * 1.2f, y, body,
-                              pad ? "controller_dpad_vertical" : "keyboard_arrows_vertical");
-                }
-                else
-                {
-                    menu_text(left - body, y - body * .12f, "•", body, white);
-                }
+                menu_text(left - body, y - body * .12f, "•", body, white);
             }
             const bool inactive = page == Page::Shaders && i < static_cast<int>(shaders.effects.size()) &&
                                   !shaders.effects[i].enabled;
@@ -1919,8 +1915,10 @@ void Frontend::draw(SDL_Renderer* renderer, TextRenderer& font, int width, int h
         else if (page == Page::Shaders)
         {
             description = shader_move ? "Move within the enabled or disabled group"
-                          : selected < static_cast<int>(shaders.effects.size()) ? "Configure this effect's parameters"
-                                                                              : "Return to Video";
+                          : selected < static_cast<int>(shaders.effects.size())
+                              ? (shaders.effects[selected].enabled ? "Configure this effect's parameters"
+                                                                  : "Enable this effect to configure its parameters")
+                          : "Return to Video";
         }
         else if (page == Page::ShaderParameters)
         {
@@ -1984,14 +1982,20 @@ void Frontend::draw(SDL_Renderer* renderer, TextRenderer& font, int width, int h
             if (!shader_move)
             {
                 prompts.push_back({pad ? "controller_buttons_north" : "keyboard_delete", "Toggle", -5});
+                prompts.push_back({pad ? "controller_buttons_west" : "", pad ? "Move" : "M: Move", -6});
             }
-            prompts.push_back({pad ? "controller_buttons_west" : "", shader_move ? (pad ? "Done" : "M: Done")
-                                                                                 : (pad ? "Move" : "M: Move"), -6});
+            else
+            {
+                prompts.push_back({pad ? "controller_dpad_vertical" : "keyboard_arrows_vertical", "Move", -1});
+            }
         }
         prompts.push_back({pad ? (swap_confirm_cancel ? "controller_buttons_south" : "controller_buttons_east") : "keyboard_escape",
                            shader_move ? "Discard" : "Back", -2});
-        prompts.push_back({pad ? (swap_confirm_cancel ? "controller_buttons_east" : "controller_buttons_south") : "keyboard_enter",
-                           shader_move ? "Done" : "Select", -3});
+        if (!shader_row || shader_move || shaders.effects[selected].enabled)
+        {
+            prompts.push_back({pad ? (swap_confirm_cancel ? "controller_buttons_east" : "controller_buttons_south") : "keyboard_enter",
+                               shader_move ? "Done" : "Select", -3});
+        }
         auto prompt_width = [&](const Prompt& prompt)
         {
             return (*prompt.icon ? icon_size + gap : 0) + font.width(prompt.title, small);
@@ -2008,7 +2012,10 @@ void Frontend::draw(SDL_Renderer* renderer, TextRenderer& font, int width, int h
         for (const auto& prompt : prompts)
         {
             const float prompt_size = prompt_width(prompt);
-            mouse_targets.push_back({{x, prompt_y - 4, prompt_size, icon_size + 8}, prompt.action});
+            if (prompt.action != -1)
+            {
+                mouse_targets.push_back({{x, prompt_y - 4, prompt_size, icon_size + 8}, prompt.action});
+            }
             if (*prompt.icon)
             {
                 font.icon(x, prompt_y + text_lift - (icon_size - small) / 2 + 2, icon_size, prompt.icon);

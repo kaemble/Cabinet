@@ -33,10 +33,16 @@ static void controls()
     key(ui, SDL_SCANCODE_RETURN);
     require(ui.page == Page::Shaders && ui.video_preview(), "Shaders must live under Video and preview the game");
     key(ui, SDL_SCANCODE_RETURN);
-    require(ui.page == Page::ShaderParameters && ui.video_preview(), "Disabled shader parameters must be accessible");
+    require(ui.page == Page::Shaders, "Inactive shader parameters must not be accessible");
     key(ui, SDL_SCANCODE_RIGHT);
-    require(ui.shaders.effects[0].parameters[0] == 5 && !ui.shaders.active(),
-            "Parameter adjustment must not enable effects");
+    require(ui.shaders.effects[0].parameters[0] == 0 && !ui.shaders.active(),
+            "Inactive shader parameters must not change");
+    key(ui, SDL_SCANCODE_DELETE);
+    require(ui.shaders.active(), "Shader toggle failed");
+    key(ui, SDL_SCANCODE_RETURN);
+    require(ui.page == Page::ShaderParameters && ui.video_preview(), "Active shader parameters must be accessible");
+    key(ui, SDL_SCANCODE_RIGHT);
+    require(ui.shaders.effects[0].parameters[0] == 5, "Active shader parameter adjustment failed");
     key(ui, SDL_SCANCODE_RETURN);
     require(ui.page == Page::ShaderParameterValues && ui.video_preview(),
             "Shader value selection must preview the game");
@@ -45,8 +51,6 @@ static void controls()
     require(ui.page == Page::ShaderParameters && ui.shaders.effects[0].parameters[0] == 10,
             "Parameter value selection failed");
     key(ui, SDL_SCANCODE_ESCAPE);
-    key(ui, SDL_SCANCODE_DELETE);
-    require(ui.shaders.active(), "Shader toggle failed");
     // Two instances distinguish ordering without adding an unshipped effect to the catalog.
     auto second = ui.shaders.effects.front();
     second.parameters[0] = 20;
@@ -141,6 +145,8 @@ static void controls()
                 pad.update(true, SDL_GetTicks());
             }
         };
+        press(SDL_GAMEPAD_BUTTON_SOUTH);
+        require(pad.page == Page::Shaders, "Controller opened inactive shader parameters");
         press(SDL_GAMEPAD_BUTTON_NORTH);
         require(pad.shaders.active(), "North did not toggle the shader");
         auto next = pad.shaders.effects[0];

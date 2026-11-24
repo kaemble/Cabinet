@@ -17,7 +17,7 @@ Internal resolution is available when advertised by the core and increases GPU l
 
 ## Shaders
 
-**Configuration → Video → Shaders** contains Cabinet's built-in effects. All effects default off, with disabled rows grayed out. Confirm opens parameters even while an effect is disabled. Left/right adjusts a parameter immediately; confirm opens its value list. The shader pages keep the game undimmed, including the second screen.
+**Configuration → Video → Shaders** contains Cabinet's built-in effects. All effects default off, with disabled rows grayed out. Enable an effect before confirming to open its parameters. Left/right adjusts a parameter immediately; confirm opens its value list. The shader pages keep the game undimmed, including the second screen.
 
 North toggles the selected effect; West starts moving it with up/down. West or confirm accepts the order, and cancel restores the previous order. Enabled effects stay above disabled effects, and moving stays within the selected group. Keyboard equivalents are Delete to toggle and M to start/finish moving. Bottom-bar actions also support the mouse. Effects execute from top to bottom and follow system/game configuration scope.
 
