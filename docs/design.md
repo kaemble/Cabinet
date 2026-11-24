@@ -136,13 +136,14 @@ Cabinet comes bundled with several cores and is already set up to emulate variou
 The MVP release should be able to handle these systems.
 
 - Game Boy / Game Boy Color (Gambatte)
-- Game Boy Advance (VBA-Next)
+- Game Boy Advance (mGBA)
 - GameCube (Dolphin)
 - Wii (Dolphin)
 - Game Gear (BlastEm)
 - Nintendo Entertainment System / Famicom (FCEUmm)
 - Nintendo 64 (Mupen64Plus-Next)
 - Nintendo DS (MelonDS)
+- Sega Dreamcast (Flycast)
 - Sega Genesis / Mega Drive (BlastEm)
 - Sega Master System (BlastEm)
 - Sega Saturn (Beetle Saturn)
@@ -161,15 +162,6 @@ The first release is ready when a user can:
 4. Open and navigate the in-game menu with a controller.
 5. Pause, resume, and return to the library without restarting the application.
 6. Change basic video, audio, and input settings.
-
-## 13. Suggested implementation sequence
-
-1. SDL window, event loop, and basic focus-driven UI.
-2. Core loading and a minimal libretro callback host.
-3. Software video presentation, audio output, and input mapping.
-4. Library import, persistence, and core assignment.
-5. Controller navigation and in-game menu.
-6. Save-state integration, additional settings, and resilience testing.
 
 The key product principle is: **make the common path simple, and keep advanced configuration available without making it mandatory.**
 
