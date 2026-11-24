@@ -140,7 +140,42 @@ struct Session
                 aspect,
                 frontend.aspect_mode,
                 frontend.scaling,
-                texture_is_hardware && hardware && hardware->flipped()};
+                texture_is_hardware && hardware && hardware->flipped(),
+                &frontend.shaders};
+    }
+    void draw_view(GamePresentation& view, SDL_Renderer* target, const GamePresentation::Image& frame,
+                   const SDL_FRect& destination, const SDL_FRect* crop = nullptr
+#ifdef CABINET_ARMADA_DRM
+                   , ArmadaDrm* scanout = nullptr
+#endif
+    )
+    {
+        auto draw = [&]
+        {
+            view.draw(target, frame, destination, crop
+#ifdef CABINET_ARMADA_DRM
+                      , scanout
+#endif
+            );
+        };
+        try
+        {
+            draw();
+        }
+        catch (const std::exception& error)
+        {
+            if (!frontend.shaders.active())
+            {
+                throw;
+            }
+            for (auto& shader : frontend.shaders.effects)
+            {
+                shader.enabled = false;
+            }
+            view.reset();
+            frontend.notify(std::string("Shaders disabled: ") + error.what());
+            draw();
+        }
     }
     ~Session()
     {
@@ -159,7 +194,14 @@ struct Session
             }
         }
         SDL_ShowCursor();
-        bottom_presentation.reset();
+        {
+            std::unique_lock<VulkanVideo> lock;
+            if (vulkan)
+            {
+                lock = std::unique_lock<VulkanVideo>(*vulkan);
+            }
+            bottom_presentation.reset();
+        }
         secondary.reset();
 #ifdef CABINET_ARMADA_DRM
         if (dual_screen && leased_bottom)
@@ -172,7 +214,14 @@ struct Session
             leased_bottom.reset();
         }
 #endif
-        presentation.reset();
+        {
+            std::unique_lock<VulkanVideo> lock;
+            if (vulkan)
+            {
+                lock = std::unique_lock<VulkanVideo>(*vulkan);
+            }
+            presentation.reset();
+        }
         if (texture && !(vulkan && texture_is_hardware))
         {
             SDL_DestroyTexture(texture);
@@ -1082,6 +1131,7 @@ static SettingsSnapshot settings_snapshot(const Session& s)
     values.fullscreen = ui.fullscreen;
     values.aspect_mode = ui.aspect_mode;
     values.scaling = ui.scaling;
+    values.shaders = ui.shaders;
     values.vsync = ui.vsync;
     values.vrr = ui.vrr;
     values.runahead_frames = ui.runahead_option_key.empty() ? ui.runahead_frames : 0;
@@ -1241,6 +1291,7 @@ static int run_game_session(const RunnerOptions& inherited, const RunnerOptions&
     }
     session.frontend.fullscreen = options.fullscreen;
     session.frontend.scaling = options.scaling;
+    session.frontend.shaders = options.shaders;
     session.frontend.wii_controller = options.wii_controller;
     session.frontend.aspect_mode = options.aspect_mode;
     session.frontend.volume = options.volume;
@@ -1414,6 +1465,19 @@ static int run_game_session(const RunnerOptions& inherited, const RunnerOptions&
                        : session.hardware ? session.hardware->create_renderer(session.window)
                                           : SDL_CreateRenderer(session.window, nullptr);
     check(session.renderer != nullptr);
+    session.frontend.shaders_supported = ShaderChain::supported(session.renderer);
+    if (!session.frontend.shaders_supported)
+    {
+        const bool active = session.frontend.shaders.active();
+        for (auto& shader : session.frontend.shaders.effects)
+        {
+            shader.enabled = false;
+        }
+        if (active)
+        {
+            session.frontend.notify("Shaders disabled: this renderer does not support effects");
+        }
+    }
     RunnerPacing pacing(session.window, session.renderer, options.timing_stats);
     pacing.initialize_presenter(session.frontend.vsync, session.fast_forward);
     SDL_SetRenderDrawColor(session.renderer, 0, 0, 0, 255);
@@ -1497,6 +1561,7 @@ static int run_game_session(const RunnerOptions& inherited, const RunnerOptions&
     bool force_redraw = true;
     bool secondary_dirty = session.secondary != nullptr, secondary_dimmed = false;
     int secondary_scaling = -1, secondary_aspect = -1;
+    shaders::Stack secondary_shaders;
     unsigned secondary_frame = 0;
     std::optional<SDL_Event> pending_event;
     bool requested_fullscreen = options.fullscreen;
@@ -1681,6 +1746,7 @@ static int run_game_session(const RunnerOptions& inherited, const RunnerOptions&
                 ui.trigger_deadzone = base.trigger_deadzone;
                 ui.fullscreen = base.fullscreen;
                 ui.scaling = base.scaling;
+                ui.shaders = base.shaders;
                 ui.aspect_mode = base.aspect_mode;
                 ui.volume = base.volume;
                 ui.vsync = base.vsync;
@@ -1715,6 +1781,7 @@ static int run_game_session(const RunnerOptions& inherited, const RunnerOptions&
                 restart->fullscreen = session.frontend.fullscreen;
                 restart->volume = session.frontend.volume;
                 restart->scaling = session.frontend.scaling;
+                restart->shaders = session.frontend.shaders;
                 restart->wii_controller = session.frontend.wii_controller;
                 restart->rumble = session.frontend.rumble_enabled;
                 restart->stick_deadzone = session.frontend.stick_deadzone;
@@ -1912,8 +1979,9 @@ static int run_game_session(const RunnerOptions& inherited, const RunnerOptions&
 #ifdef CABINET_ARMADA_DRM
         if (session.dual_screen && session.leased_bottom &&
             (secondary_frame != session.frames ||
-             secondary_dimmed != (session.frontend.paused() && session.frontend.page != Page::Video) ||
-             secondary_scaling != session.frontend.scaling || secondary_aspect != session.frontend.aspect_mode))
+             secondary_dimmed != (session.frontend.paused() && !session.frontend.video_preview()) ||
+             secondary_scaling != session.frontend.scaling || secondary_aspect != session.frontend.aspect_mode ||
+             secondary_shaders != session.frontend.shaders))
         {
             secondary_dirty = true;
         }
@@ -1930,6 +1998,10 @@ static int run_game_session(const RunnerOptions& inherited, const RunnerOptions&
         {
             presentation_lock = std::unique_lock<VulkanVideo>(*session.vulkan);
         }
+        if (!session.frontend.shaders.active())
+        {
+            session.bottom_presentation.reset_shaders();
+        }
         check(SDL_RenderClear(session.renderer));
         if (session.texture)
         {
@@ -1941,13 +2013,12 @@ static int run_game_session(const RunnerOptions& inherited, const RunnerOptions&
             {
                 const auto view = dual_screen::window_view(input_system, 0, w, h);
                 const auto source = dual_screen::pixels(view.source, session.width, session.height);
-                session.presentation.draw(session.renderer, session.presentation_image(),
-                                          GamePresentation::screen_viewport(session.presentation_image(), view),
-                                          &source);
+                session.draw_view(session.presentation, session.renderer, session.presentation_image(),
+                                  GamePresentation::screen_viewport(session.presentation_image(), view), &source);
             }
             else
             {
-                session.presentation.draw(session.renderer, session.presentation_image(), dest);
+                session.draw_view(session.presentation, session.renderer, session.presentation_image(), dest);
             }
         }
         int output_w = 0, output_h = 0;
@@ -1962,11 +2033,12 @@ static int run_game_session(const RunnerOptions& inherited, const RunnerOptions&
             check(saved);
         }
         const auto present_started = diagnostics.begin_present();
-        const bool dim_bottom = session.frontend.paused() && session.frontend.page != Page::Video;
+        const bool dim_bottom = session.frontend.paused() && !session.frontend.video_preview();
 #ifdef CABINET_ARMADA_DRM
         if (session.dual_screen && session.leased_bottom &&
             (force_redraw || secondary_frame != session.frames || secondary_dimmed != dim_bottom ||
-             secondary_scaling != session.frontend.scaling || secondary_aspect != session.frontend.aspect_mode) &&
+             secondary_scaling != session.frontend.scaling || secondary_aspect != session.frontend.aspect_mode ||
+             secondary_shaders != session.frontend.shaders) &&
             session.leased_bottom->begin_draw())
         {
             session.leased_bottom->clear();
@@ -1975,9 +2047,9 @@ static int run_game_session(const RunnerOptions& inherited, const RunnerOptions&
                 const auto view = dual_screen::window_view(input_system, 1, session.leased_bottom->width(),
                                                            session.leased_bottom->height());
                 const auto source = dual_screen::pixels(view.source, session.width, session.height);
-                session.bottom_presentation.draw(session.renderer, session.presentation_image(),
-                                                 GamePresentation::screen_viewport(session.presentation_image(), view),
-                                                 &source, session.leased_bottom.get());
+                session.draw_view(session.bottom_presentation, session.renderer, session.presentation_image(),
+                                  GamePresentation::screen_viewport(session.presentation_image(), view),
+                                  &source, session.leased_bottom.get());
                 if (dim_bottom)
                 {
                     session.leased_bottom->dim(165);
@@ -1988,12 +2060,14 @@ static int run_game_session(const RunnerOptions& inherited, const RunnerOptions&
             secondary_dimmed = dim_bottom;
             secondary_scaling = session.frontend.scaling;
             secondary_aspect = session.frontend.aspect_mode;
+            secondary_shaders = session.frontend.shaders;
         }
 #endif
         if (session.secondary &&
             !(SDL_GetWindowFlags(session.secondary->window) & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_HIDDEN)) &&
             (secondary_dirty || secondary_frame != session.frames || secondary_dimmed != dim_bottom ||
-             secondary_scaling != session.frontend.scaling || secondary_aspect != session.frontend.aspect_mode))
+             secondary_scaling != session.frontend.scaling || secondary_aspect != session.frontend.aspect_mode ||
+             secondary_shaders != session.frontend.shaders))
         {
             auto& bottom = *session.secondary;
             bottom.begin_draw();
@@ -2007,8 +2081,8 @@ static int run_game_session(const RunnerOptions& inherited, const RunnerOptions&
                 const auto source = dual_screen::pixels(view.source, session.width, session.height);
                 auto frame = session.presentation_image();
                 frame.texture = image;
-                session.bottom_presentation.draw(bottom.renderer, frame, GamePresentation::screen_viewport(frame, view),
-                                                 &source);
+                session.draw_view(session.bottom_presentation, bottom.renderer, frame,
+                                  GamePresentation::screen_viewport(frame, view), &source);
                 if (dim_bottom)
                 {
                     check(SDL_SetRenderDrawBlendMode(bottom.renderer, SDL_BLENDMODE_BLEND));
@@ -2023,13 +2097,15 @@ static int run_game_session(const RunnerOptions& inherited, const RunnerOptions&
             secondary_dimmed = dim_bottom;
             secondary_scaling = session.frontend.scaling;
             secondary_aspect = session.frontend.aspect_mode;
+            secondary_shaders = session.frontend.shaders;
         }
 #ifdef CABINET_ARMADA_DRM
         if (session.dual_screen && session.leased_bottom)
         {
             secondary_dirty = secondary_frame != session.frames || secondary_dimmed != dim_bottom ||
                               secondary_scaling != session.frontend.scaling ||
-                              secondary_aspect != session.frontend.aspect_mode;
+                              secondary_aspect != session.frontend.aspect_mode ||
+                              secondary_shaders != session.frontend.shaders;
         }
         else
 #endif

@@ -1,6 +1,7 @@
 #pragma once
 #include "wii_controller.h"
 #include "aspect_ratio.h"
+#include "shader_settings.h"
 #include <map>
 #include <cstdint>
 #include <set>
@@ -17,6 +18,7 @@ enum class HardwareApi
 
 struct RunnerOptions
 {
+    shaders::Stack shaders;
     std::string rom, core, data_dir, system_dir, save_dir, state_dir, state_file, load_state;
     std::string title, screenshot, system, game_id, save_name;
     std::map<std::string, std::string> core_options;

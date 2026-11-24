@@ -110,6 +110,7 @@ bool Frontend::discover()
 }
 void Frontend::open_menu()
 {
+    discard_shader_move();
     stop_rumble();
     fast_forward_held = false;
     hotkey_pressed.fill(false);
@@ -127,6 +128,7 @@ void Frontend::open_menu()
 }
 void Frontend::resume()
 {
+    discard_shader_move();
     fast_forward_held = false;
     hotkey_pressed.fill(false);
     mouse_press = -1;
@@ -185,7 +187,7 @@ bool Frontend::mouse_event(const SDL_Event& e)
         if (e.motion.xrel != 0 || e.motion.yrel != 0)
         {
             const int target = mouse_target(e.motion.x, e.motion.y);
-            if (target >= 0)
+            if (target >= 0 && !shader_move)
             {
                 selected = target;
             }
@@ -202,7 +204,10 @@ bool Frontend::mouse_event(const SDL_Event& e)
         const int steps = static_cast<int>(wheel_remainder);
         wheel_remainder -= steps;
         // Clamp rather than wrap when scrolling through a long binding list.
-        selected = std::clamp(selected - steps, 0, static_cast<int>(rows().size()) - 1);
+        if (!shader_move)
+        {
+            selected = std::clamp(selected - steps, 0, static_cast<int>(rows().size()) - 1);
+        }
     }
     else if (e.type == SDL_EVENT_MOUSE_BUTTON_DOWN || e.type == SDL_EVENT_MOUSE_BUTTON_UP)
     {
@@ -233,7 +238,7 @@ bool Frontend::mouse_event(const SDL_Event& e)
         {
             mouse_press = target;
             mouse_press_page = page;
-            if (target >= 0)
+            if (target >= 0 && !shader_move)
             {
                 selected = target;
             }
@@ -253,6 +258,14 @@ bool Frontend::mouse_event(const SDL_Event& e)
                 else if (target == -4)
                 {
                     bind_source(0);
+                }
+                else if (target == -5)
+                {
+                    toggle_shader();
+                }
+                else if (target == -6)
+                {
+                    move_shader();
                 }
                 else
                 {
@@ -401,6 +414,16 @@ void Frontend::event(const SDL_Event& e)
         }
         return;
     }
+    if (page == Page::Shaders && e.key.scancode == SDL_SCANCODE_DELETE)
+    {
+        toggle_shader();
+        return;
+    }
+    if (page == Page::Shaders && e.key.scancode == SDL_SCANCODE_M)
+    {
+        move_shader();
+        return;
+    }
     switch (e.key.scancode)
     {
     case SDL_SCANCODE_UP:
@@ -491,6 +514,7 @@ void Frontend::update(bool focused, std::uint64_t now)
                 .buttons;
         previous = nav;
         previous_clear = button(SDL_GAMEPAD_BUTTON_NORTH);
+        previous_move = button(SDL_GAMEPAD_BUTTON_WEST);
         return;
     }
     auto result = home_shortcut
@@ -525,6 +549,19 @@ void Frontend::update(bool focused, std::uint64_t now)
         return;
     }
     const bool clear = button(SDL_GAMEPAD_BUTTON_NORTH);
+    const bool move = button(SDL_GAMEPAD_BUTTON_WEST);
+    if (page == Page::Shaders)
+    {
+        if (clear && !previous_clear)
+        {
+            toggle_shader();
+        }
+        if (move && !previous_move)
+        {
+            move_shader();
+        }
+    }
+    previous_move = move;
     if ((page == Page::Bindings || page == Page::Hotkeys) && !capturing && clear && !previous_clear &&
         selected < static_cast<int>(((page == Page::Hotkeys) ? hotkeys : bindings).rows().size()))
     {
@@ -852,6 +889,42 @@ std::vector<std::string> Frontend::rows() const
                              (resolution_needs_restart ? " (restart required)" : ""));
         }
         result.push_back(std::string("Aspect ratio: ") + aspect_ratio::name(aspect_mode));
+        result.push_back("Shaders");
+        result.push_back("Back");
+        return result;
+    }
+    case Page::Shaders:
+    {
+        std::vector<std::string> result;
+        for (const auto& shader : shaders.effects)
+        {
+            result.push_back(std::string(shaders::name(shader.effect)) + (shader.enabled ? ": on" : ": off"));
+        }
+        result.push_back("Back");
+        return result;
+    }
+    case Page::ShaderParameters:
+    {
+        std::vector<std::string> result;
+        const auto& shader = shaders.effects.at(shader_selection);
+        for (std::size_t i = 0; i < shaders::color_parameters.size(); ++i)
+        {
+            result.push_back(std::string(shaders::color_parameters[i].name) + ": " +
+                             std::to_string(shader.parameters[i]) + "%");
+        }
+        result.push_back("Restore defaults");
+        result.push_back("Back");
+        return result;
+    }
+    case Page::ShaderParameterValues:
+    {
+        std::vector<std::string> result;
+        const auto& parameter = shaders::color_parameters[shader_parameter];
+        const int current = shaders.effects.at(shader_selection).parameters[shader_parameter];
+        for (int value = parameter.minimum; value <= parameter.maximum; value += parameter.step)
+        {
+            result.push_back(std::to_string(value) + "%" + ((value == current) ? " (current)" : ""));
+        }
         result.push_back("Back");
         return result;
     }
@@ -875,10 +948,53 @@ std::vector<std::string> Frontend::rows() const
 }
 void Frontend::navigate(int direction)
 {
+    if (page == Page::Shaders && shader_move)
+    {
+        selected = shaders.move(selected, direction);
+        return;
+    }
     int count = static_cast<int>(rows().size());
     if (count)
     {
         selected = (selected + direction + count) % count;
+    }
+}
+void Frontend::discard_shader_move()
+{
+    if (shader_move)
+    {
+        shaders = *shader_move;
+        shader_move.reset();
+        selected = shader_selection;
+    }
+}
+void Frontend::toggle_shader()
+{
+    if (page != Page::Shaders || shader_move || selected < 0 || selected >= static_cast<int>(shaders.effects.size()))
+    {
+        return;
+    }
+    if (!shaders_supported)
+    {
+        notify("Shaders require an OpenGL, OpenGL ES, or Vulkan renderer");
+        return;
+    }
+    selected = shaders.toggle(selected);
+}
+void Frontend::move_shader()
+{
+    if (page != Page::Shaders || selected < 0 || selected >= static_cast<int>(shaders.effects.size()))
+    {
+        return;
+    }
+    if (shader_move)
+    {
+        shader_move.reset();
+    }
+    else
+    {
+        shader_selection = selected;
+        shader_move = shaders;
     }
 }
 void Frontend::confirm(Action action)
@@ -925,7 +1041,29 @@ void Frontend::cycle_runahead(int direction)
 
 void Frontend::back()
 {
-    if (page == Page::CoreOptionValues)
+    if (page == Page::Shaders && shader_move)
+    {
+        discard_shader_move();
+    }
+    else if (page == Page::ShaderParameterValues)
+    {
+        page = Page::ShaderParameters;
+        selected = shader_parameter;
+        blocked = true;
+    }
+    else if (page == Page::ShaderParameters)
+    {
+        page = Page::Shaders;
+        selected = shader_selection;
+        blocked = true;
+    }
+    else if (page == Page::Shaders)
+    {
+        page = Page::Video;
+        selected = resolution_values.empty() ? 3 : 4;
+        blocked = true;
+    }
+    else if (page == Page::CoreOptionValues)
     {
         page = Page::CoreOptions;
         selected = std::min(core_options_selection, static_cast<int>(visible_all_core_options().size()));
@@ -1001,6 +1139,13 @@ int Frontend::controls_row() const
 }
 void Frontend::adjust(int direction)
 {
+    if (page == Page::ShaderParameters && selected >= 0 && selected < static_cast<int>(shaders::color_parameters.size()))
+    {
+        auto& value = shaders.effects.at(shader_selection).parameters[selected];
+        const auto& parameter = shaders::color_parameters[selected];
+        value = std::clamp(value + direction * parameter.step, parameter.minimum, parameter.maximum);
+        return;
+    }
     if (page == Page::Controls)
     {
         const int row = controls_row();
@@ -1069,6 +1214,52 @@ void Frontend::activate()
 {
     switch (page)
     {
+    case Page::Shaders:
+        if (shader_move)
+        {
+            shader_move.reset();
+        }
+        else if (selected >= 0 && selected < static_cast<int>(shaders.effects.size()))
+        {
+            shader_selection = selected;
+            page = Page::ShaderParameters;
+            selected = 0;
+            blocked = true;
+        }
+        else
+        {
+            back();
+        }
+        break;
+    case Page::ShaderParameters:
+        if (selected >= 0 && selected < static_cast<int>(shaders::color_parameters.size()))
+        {
+            shader_parameter = selected;
+            const auto& parameter = shaders::color_parameters[selected];
+            selected = (shaders.effects.at(shader_selection).parameters[selected] - parameter.minimum) / parameter.step;
+            page = Page::ShaderParameterValues;
+            blocked = true;
+        }
+        else if (selected == static_cast<int>(shaders::color_parameters.size()))
+        {
+            shaders.effects.at(shader_selection).parameters = shaders::Shader{}.parameters;
+        }
+        else
+        {
+            back();
+        }
+        break;
+    case Page::ShaderParameterValues:
+    {
+        const auto& parameter = shaders::color_parameters[shader_parameter];
+        const int value = parameter.minimum + selected * parameter.step;
+        if (value >= parameter.minimum && value <= parameter.maximum)
+        {
+            shaders.effects.at(shader_selection).parameters[shader_parameter] = value;
+        }
+        back();
+        break;
+    }
     case Page::Main:
         switch (selected)
         {
@@ -1292,6 +1483,12 @@ void Frontend::activate()
         {
             aspect_mode = (aspect_mode + 1) % aspect_ratio::Count;
         }
+        else if (selected == (resolution_values.empty() ? 3 : 4))
+        {
+            page = Page::Shaders;
+            selected = 0;
+            blocked = true;
+        }
         else
         {
             back();
@@ -1435,6 +1632,10 @@ Frontend::MenuAppearance Frontend::menu_appearance(std::uint64_t now) const
                               show_stats ? stats_text : "",
                               rows(),
                               {}};
+    if (page == Page::Shaders)
+    {
+        appearance.descriptions.push_back(shader_move ? "moving" : "idle");
+    }
     if (page == Page::Advanced)
     {
         for (const auto& choice : core_choices)
@@ -1516,14 +1717,14 @@ void Frontend::draw(SDL_Renderer* renderer, TextRenderer& font, int width, int h
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
     if (paused())
     {
-        if (page != Page::Video)
+        if (!video_preview())
         {
             box({0, 0, w, h}, 0, 0, 0, 165);
         }
         auto menu_text =
             [&](float x, float y, const std::string& value, int size, SDL_Color color, float max_width = 10000)
         {
-            if (page == Page::Video)
+            if (video_preview())
             {
                 const float offset = std::max(1.0f, 2 * scale);
                 font.draw(x + offset, y + offset, value, size, {0, 0, 0, 220}, max_width);
@@ -1547,6 +1748,15 @@ void Frontend::draw(SDL_Renderer* renderer, TextRenderer& font, int width, int h
             break;
         case Page::Bindings:
             heading = std::string(binding_keyboard ? "Keyboard bindings / " : "Gamepad bindings / ") + scope;
+            break;
+        case Page::Shaders:
+            heading = "Shaders / " + scope;
+            break;
+        case Page::ShaderParameters:
+            heading = shaders::name(shaders.effects.at(shader_selection).effect);
+            break;
+        case Page::ShaderParameterValues:
+            heading = shaders::color_parameters[shader_parameter].name;
             break;
         case Page::Video:
             heading = "Video / " + scope;
@@ -1593,9 +1803,20 @@ void Frontend::draw(SDL_Renderer* renderer, TextRenderer& font, int width, int h
             mouse_targets.push_back({{left - body, y, w - margin - left + body, row_height}, i});
             if (i == selected)
             {
-                menu_text(left - body, y - body * .12f, "•", body, white);
+                if (shader_move)
+                {
+                    font.icon(left - body * 1.2f, y, body,
+                              pad ? "controller_dpad_vertical" : "keyboard_arrows_vertical");
+                }
+                else
+                {
+                    menu_text(left - body, y - body * .12f, "•", body, white);
+                }
             }
-            menu_text(left, y, items[i], body, (i == selected) ? white : gray, w - left - margin);
+            const bool inactive = page == Page::Shaders && i < static_cast<int>(shaders.effects.size()) &&
+                                  !shaders.effects[i].enabled;
+            menu_text(left, y, items[i], body, inactive ? SDL_Color{112, 112, 112, 255} : (i == selected) ? white : gray,
+                      w - left - margin);
         }
         std::string description;
         if (page == Page::Main)
@@ -1695,12 +1916,31 @@ void Frontend::draw(SDL_Renderer* renderer, TextRenderer& font, int width, int h
             description = capturing ? "Release controls, then press a new input"
                                     : "Select to add an input. Delete / North clears this action.";
         }
+        else if (page == Page::Shaders)
+        {
+            description = shader_move ? "Move within the enabled or disabled group"
+                          : selected < static_cast<int>(shaders.effects.size()) ? "Configure this effect's parameters"
+                                                                              : "Return to Video";
+        }
+        else if (page == Page::ShaderParameters)
+        {
+            description = selected < static_cast<int>(shaders::color_parameters.size())
+                              ? shaders::color_parameters[selected].description
+                          : selected == static_cast<int>(shaders::color_parameters.size()) ? "Restore neutral color correction"
+                                                                                         : "Return to Shaders";
+        }
+        else if (page == Page::ShaderParameterValues)
+        {
+            description = shaders::color_parameters[shader_parameter].description;
+        }
         else if (page == Page::Video)
         {
             const std::array<const char*, 3> descriptions{
                 "Toggle fullscreen for this session", "Choose nearest, Bilinear, Sharp Bilinear, or Integer scaling",
                 "Return to Configuration"};
-            description = (selected == (resolution_values.empty() ? 2 : 3))
+            description = (selected == (resolution_values.empty() ? 3 : 4)) ? "Configure the game image shader stack"
+                          : (selected == (resolution_values.empty() ? 4 : 5)) ? "Return to Configuration"
+                          : (selected == (resolution_values.empty() ? 2 : 3))
                               ? "Choose Auto, 16:9, 4:3, 8:7, or Stretch to fit"
                           : (selected == 2 && !resolution_values.empty())
                               ? (resolution_needs_restart ? "Left / Right: resolution. Restart game to apply it."
@@ -1725,33 +1965,58 @@ void Frontend::draw(SDL_Renderer* renderer, TextRenderer& font, int width, int h
         const float icon_size = small * 1.35f;
         const float gap = small * .35f;
         const float between = small;
-        const float back_width = icon_size + gap + font.width("Back", small);
-        const float select_width = icon_size + gap + font.width("Select", small);
+        struct Prompt
+        {
+            const char* icon;
+            const char* title;
+            int action;
+        };
+        std::vector<Prompt> prompts;
+        const bool shader_row = page == Page::Shaders && selected < static_cast<int>(shaders.effects.size());
         const bool unbind = (page == Page::Bindings || page == Page::Hotkeys) && !capturing &&
                             selected < static_cast<int>(((page == Page::Hotkeys) ? hotkeys : bindings).rows().size());
-        const float clear_width = unbind ? icon_size + gap + font.width("Unbind", small) + between : 0;
-        float x = w - margin - back_width - between - select_width - clear_width;
+        if (unbind)
+        {
+            prompts.push_back({pad ? "controller_buttons_north" : "keyboard_delete", "Unbind", -4});
+        }
+        if (shader_row)
+        {
+            if (!shader_move)
+            {
+                prompts.push_back({pad ? "controller_buttons_north" : "keyboard_delete", "Toggle", -5});
+            }
+            prompts.push_back({pad ? "controller_buttons_west" : "", shader_move ? (pad ? "Done" : "M: Done")
+                                                                                 : (pad ? "Move" : "M: Move"), -6});
+        }
+        prompts.push_back({pad ? (swap_confirm_cancel ? "controller_buttons_south" : "controller_buttons_east") : "keyboard_escape",
+                           shader_move ? "Discard" : "Back", -2});
+        prompts.push_back({pad ? (swap_confirm_cancel ? "controller_buttons_east" : "controller_buttons_south") : "keyboard_enter",
+                           shader_move ? "Done" : "Select", -3});
+        auto prompt_width = [&](const Prompt& prompt)
+        {
+            return (*prompt.icon ? icon_size + gap : 0) + font.width(prompt.title, small);
+        };
+        float x = w - margin + between;
+        for (const auto& prompt : prompts)
+        {
+            x -= prompt_width(prompt) + between;
+        }
         const float text_lift = small * .15f;
         const float prompt_y = (compact ? h - small - 14 : bar_top + (bar_height - small) / 2 - 2) - text_lift;
         font.draw(margin, bar_top + (compact ? 6 : (bar_height - small) / 2 - 2) - text_lift, description, small, white,
                   compact ? w - margin * 2 : x - margin - between);
-        auto prompt = [&](const std::string& icon, const std::string& text, int action)
+        for (const auto& prompt : prompts)
         {
-            mouse_targets.push_back(
-                {{x, prompt_y - 4, icon_size + gap + font.width(text, small), icon_size + 8}, action});
-            font.icon(x, prompt_y + text_lift - (icon_size - small) / 2 + 2, icon_size, icon);
-            x += icon_size + gap;
-            font.draw(x, prompt_y, text, small, white);
-            x += font.width(text, small) + between;
-        };
-        if (unbind)
-        {
-            prompt(pad ? "controller_buttons_north" : "keyboard_delete", "Unbind", -4);
+            const float prompt_size = prompt_width(prompt);
+            mouse_targets.push_back({{x, prompt_y - 4, prompt_size, icon_size + 8}, prompt.action});
+            if (*prompt.icon)
+            {
+                font.icon(x, prompt_y + text_lift - (icon_size - small) / 2 + 2, icon_size, prompt.icon);
+                x += icon_size + gap;
+            }
+            font.draw(x, prompt_y, prompt.title, small, white);
+            x += font.width(prompt.title, small) + between;
         }
-        prompt(pad ? (swap_confirm_cancel ? "controller_buttons_south" : "controller_buttons_east") : "keyboard_escape",
-               "Back", -2);
-        prompt(pad ? (swap_confirm_cancel ? "controller_buttons_east" : "controller_buttons_south") : "keyboard_enter",
-               "Select", -3);
     }
     if (!notice.empty() && draw_now < notice_until)
     {

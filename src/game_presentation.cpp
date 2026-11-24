@@ -24,6 +24,17 @@ GamePresentation::~GamePresentation()
 
 void GamePresentation::reset()
 {
+    reset_shaders();
+    reset_intermediate();
+}
+
+void GamePresentation::reset_shaders()
+{
+    shader_chain.reset();
+}
+
+void GamePresentation::reset_intermediate()
+{
     if (intermediate)
     {
         SDL_DestroyTexture(intermediate);
@@ -75,6 +86,14 @@ void GamePresentation::draw(SDL_Renderer* renderer, const Image& frame, const SD
 )
 {
     auto* texture = frame.texture;
+    if (frame.shaders && frame.shaders->active())
+    {
+        texture = shader_chain.draw(renderer, texture, frame.width, frame.height, *frame.shaders);
+    }
+    else
+    {
+        reset_shaders();
+    }
     SDL_FRect source =
         crop ? *crop : SDL_FRect{0, 0, static_cast<float>(frame.width), static_cast<float>(frame.height)};
     SDL_FlipMode flip = frame.flipped ? SDL_FLIP_VERTICAL : SDL_FLIP_NONE;
@@ -105,7 +124,7 @@ void GamePresentation::draw(SDL_Renderer* renderer, const Image& frame, const SD
         const int width = static_cast<int>(source.w) * factor, height = static_cast<int>(source.h) * factor;
         if (!intermediate || intermediate_dimensions.x != width || intermediate_dimensions.y != height)
         {
-            reset();
+            reset_intermediate();
             intermediate =
                 SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, width, height);
             check(intermediate != nullptr);
@@ -124,7 +143,7 @@ void GamePresentation::draw(SDL_Renderer* renderer, const Image& frame, const SD
     }
     else
     {
-        reset();
+        reset_intermediate();
     }
     check(SDL_SetTextureScaleMode(texture, filter));
 #ifdef CABINET_ARMADA_DRM

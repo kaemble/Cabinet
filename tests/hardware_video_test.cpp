@@ -195,6 +195,9 @@ int main(int argc, char** argv) {
                         get(GL_READ_BUFFER, &value); require(value == GL_NONE, "Read buffer selection changed");
                         proc<decltype(&glDeleteBuffers)>("glDeleteBuffers")(1, &pbo);
                     }
+                    s.frontend.shaders.effects[0].enabled = false;
+                    verify_pixels(s, flip);
+                    s.frontend.shaders.effects[0].enabled = true;
                     verify_pixels(s, flip);
                     s.frontend.scaling = 2;
                     verify_pixels(s, flip);

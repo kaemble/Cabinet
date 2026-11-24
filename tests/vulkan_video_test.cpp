@@ -1,5 +1,6 @@
 #include "vulkan_video.h"
 #include "secondary_window.h"
+#include "shader_chain.h"
 #include <SDL3/SDL_vulkan.h>
 #include <iostream>
 #include <stdexcept>
@@ -91,6 +92,9 @@ int main(int argc, char**) {
             };
             video.negotiate(&negotiation);
             auto renderer = video.create_renderer(window, argc > 1);
+            ShaderChain shader_chain;
+            shaders::Stack shader_settings;
+            shader_settings.effects[0].enabled = true;
             SecondaryWindow bottom;
             bottom.create(window, renderer, nullptr, &video, "Vulkan screens", 320, 240);
             require(video.frame(32, 32) == nullptr, "Startup without an exported image was not deferred");
@@ -203,7 +207,7 @@ int main(int argc, char**) {
                         api.set_command_buffers(api.handle, 1, &producer);
                         texture = video.frame(size, size);
                         require(SDL_RenderClear(renderer), SDL_GetError());
-                        require(SDL_RenderTexture(renderer, texture, nullptr, nullptr), SDL_GetError());
+                        require(SDL_RenderTexture(renderer, shader_chain.draw(renderer, texture, size, size, shader_settings), nullptr, nullptr), SDL_GetError());
                         if (n == 47) {
                             auto pixels = SDL_RenderReadPixels(renderer, nullptr); require(pixels, SDL_GetError());
                             Uint8 r, g, b, a;
@@ -260,7 +264,7 @@ int main(int argc, char**) {
                 video.idle();
                 vkDestroySemaphore(api.device, released, nullptr);
                 require(texture == video.frame(size, size), "Duplicate lost snapshot");
-                require(SDL_RenderTexture(renderer, texture, nullptr, nullptr), SDL_GetError());
+                require(SDL_RenderTexture(renderer, shader_chain.draw(renderer, texture, size, size, shader_settings), nullptr, nullptr), SDL_GetError());
                 auto pixels = SDL_RenderReadPixels(renderer, nullptr); require(pixels, SDL_GetError());
                 Uint8 r, g, b, a;
                 require(SDL_ReadSurfacePixel(pixels, 100, 100, &r, &g, &b, &a), SDL_GetError());

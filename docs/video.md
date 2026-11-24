@@ -15,6 +15,16 @@
 
 Internal resolution is available when advertised by the core and increases GPU load and memory use. Dolphin, Mupen64Plus-Next, Flycast, and melonDS DS require a confirmed restart to apply it. melonDS DS uses Software at 1x and OpenGL Compute above 1x. Resolution and other video settings follow [system/game configuration scope](controls.md#settings-scope).
 
+## Shaders
+
+**Configuration → Video → Shaders** contains Cabinet's built-in effects. All effects default off, with disabled rows grayed out. Confirm opens parameters even while an effect is disabled. Left/right adjusts a parameter immediately; confirm opens its value list. The shader pages keep the game undimmed, including the second screen.
+
+North toggles the selected effect; West starts moving it with up/down. West or confirm accepts the order, and cancel restores the previous order. Enabled effects stay above disabled effects, and moving stays within the selected group. Keyboard equivalents are Delete to toggle and M to start/finish moving. Bottom-bar actions also support the mouse. Effects execute from top to bottom and follow system/game configuration scope.
+
+Color correction provides brightness, contrast, saturation, gamma, and red/green/blue gain. Defaults are neutral: brightness 0%, all other parameters 100%. Saturation 0% produces grayscale, and higher gamma brightens midtones. Processing runs at source resolution before the selected scaling mode; menus and text are drawn afterward. OpenGL, GLES2, and Vulkan are supported. With no effects enabled, the existing presentation path runs without shader programs, intermediate effect textures, or effect passes.
+
+The shared GLSL source is in `assets/shaders/color_correction.glsl`. Developers regenerate the embedded GL/GLES source and Vulkan SPIR-V with `python tools/build_shaders.py`, which requires `glslangValidator`. Normal builds and users do not need shader compilation tools or preset files.
+
 ## Hardware rendering
 
 Software, OpenGL/OpenGL ES, and Vulkan cores are supported. `--opengl` and `--vulkan` select the preferred hardware API; if both appear, the last wins. Dolphin and Flycast default to Vulkan, while other cores prefer OpenGL Core. A core must implement the selected backend and may also require a renderer option. These flags do not select Home's renderer.

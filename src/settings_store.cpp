@@ -108,7 +108,11 @@ void settings_store::read_system(const std::string& system, RunnerOptions& resul
         {
             continue;
         }
-        if (key == "resolution" || key == "core_option")
+        if (key == "shader")
+        {
+            result.shaders.read(entry);
+        }
+        else if (key == "resolution" || key == "core_option")
         {
             std::string option, resolution;
             if (entry >> std::quoted(option) >> std::quoted(resolution))
@@ -164,7 +168,11 @@ void settings_store::read_game(const fs::path& file, RunnerOptions& options)
         {
             continue;
         }
-        if (key == "resolution" || key == "core_option")
+        if (key == "shader")
+        {
+            options.shaders.read(entry);
+        }
+        else if (key == "resolution" || key == "core_option")
         {
             std::string option, resolution;
             if (entry >> std::quoted(option) >> std::quoted(resolution))
@@ -233,6 +241,7 @@ void settings_store::read_game(const fs::path& file, RunnerOptions& options)
 static void write_advanced_config(std::ostream& out, const SettingsSnapshot& snapshot)
 {
     out << "vsync " << snapshot.values.vsync << "\nvrr " << snapshot.values.vrr << '\n';
+    snapshot.values.shaders.write(out);
     out << "runahead_frames " << snapshot.values.runahead_frames << '\n';
     for (const auto& [key, value] : snapshot.core_options)
     {

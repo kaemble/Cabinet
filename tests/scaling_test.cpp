@@ -48,6 +48,9 @@ int main() {
             pixel(559, 455, 0, 255); pixel(560, 455, 0, 0); pixel(559, 456, 0, 0);
             SDL_DestroySurface(result);
             require(s.presentation.intermediate_size().x == 0, "Integer scaling allocated an intermediate texture");
+            s.frontend.shaders.effects[0].enabled = true;
+            s.draw_view(s.presentation, s.renderer, s.presentation_image(), viewport);
+            require(!s.frontend.shaders.active(), "Unsupported shader backend must fall back without stopping the game");
             s.frontend.scaling = 2;
             for (float factor : {0.5f, 1.0f, 1.5f}) {
                 s.presentation.draw(s.renderer, s.presentation_image(), {0, 0, s.width * 2.0f, s.height * 2.0f});

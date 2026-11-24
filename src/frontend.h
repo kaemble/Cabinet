@@ -2,6 +2,7 @@
 #include <cstdint>
 #include "wii_controller.h"
 #include "aspect_ratio.h"
+#include "shader_settings.h"
 #include <SDL3/SDL.h>
 #include <array>
 #include <string>
@@ -31,6 +32,9 @@ enum class Page
     Bindings,
     Hotkeys,
     Video,
+    Shaders,
+    ShaderParameters,
+    ShaderParameterValues,
     Audio,
     Advanced,
     CoreOptions,
@@ -82,6 +86,13 @@ public:
     {
         return page != Page::Game;
     }
+    bool video_preview() const
+    {
+        return page == Page::Video || page == Page::Shaders || page == Page::ShaderParameters ||
+               page == Page::ShaderParameterValues;
+    }
+    shaders::Stack shaders;
+    bool shaders_supported = true;
     SDL_JoystickID controller_id() const;
     bool request_rumble(bool strong, std::uint16_t strength);
     void stop_rumble();
@@ -187,6 +198,12 @@ private:
     std::string selected_core_option;
     int core_options_selection = 0;
     bool binding_keyboard = false, capturing = false, previous_clear = false;
+    bool previous_move = false;
+    std::optional<shaders::Stack> shader_move;
+    int shader_selection = 0, shader_parameter = 0;
+    void discard_shader_move();
+    void toggle_shader();
+    void move_shader();
     std::array<bool, SDL_SCANCODE_COUNT> hotkey_keys{};
     std::array<bool, 2> hotkey_pressed{};
     std::array<std::int16_t, 16> previous_hotkeys{};
