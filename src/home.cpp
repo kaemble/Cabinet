@@ -2213,48 +2213,71 @@ void Home::draw()
     const bool compact = l.width < 760;
     const float margin = std::max(24.0f, l.width * .045f), icon_size = l.small * 1.35f, gap = l.small * .35f;
     const float between = l.small, lift = l.small * .15f;
-    const bool show_clear = pad && can_clear_search();
-    const float clear_width = show_clear ? icon_size + gap + text.width("Clear", l.small) + between : 0;
-    const bool show_menu = modal == Modal::None || modal == Modal::Menu;
-    const float menu_width = show_menu ? (pad ? text.width("Start: Menu", l.small)
-                                             : icon_size + gap + text.width("Menu", l.small)) + between : 0;
-    float x = l.width - margin - 2 * (icon_size + gap) - text.width("Back", l.small) - text.width("Select", l.small) -
-              between - clear_width - menu_width;
+    struct Prompt
+    {
+        const char* icon;
+        const char* title;
+        int kind;
+    };
+    std::vector<Prompt> prompts;
+    if (pad && can_clear_search())
+    {
+        prompts.push_back({"controller_buttons_north", "Clear", 9});
+    }
+    if (modal == Modal::None || modal == Modal::Menu)
+    {
+        prompts.push_back({pad ? "" : "keyboard_escape", pad ? "Start: Menu" : "Menu", 10});
+    }
+    if (modal == Modal::Browse)
+    {
+        prompts.push_back({pad ? "controller_dpad_horizontal" : "keyboard_arrows_horizontal",
+                           compact ? "Letter" : "Jump by letter", -1});
+    }
+    if (modal == Modal::Edit && !typing_title && choice == 1 && draft.system != "generic")
+    {
+        prompts.push_back({pad ? "controller_dpad_horizontal" : "keyboard_arrows_horizontal",
+                           compact ? "Change" : "Change system", -1});
+    }
+    if (typing_title)
+    {
+        prompts.push_back({"keyboard_arrows_horizontal", compact ? "Move" : "Move cursor", -1});
+    }
+    prompts.push_back({pad ? (swap_confirm_cancel ? "controller_buttons_south" : "controller_buttons_east")
+                          : "keyboard_escape",
+                       modal == Modal::Browse ? "Cancel" : "Back", 5});
+    prompts.push_back({pad ? (swap_confirm_cancel ? "controller_buttons_east" : "controller_buttons_south")
+                          : "keyboard_enter",
+                       (search || typing_title) ? "Done" : modal == Modal::Browse ? "Open" : "Select", 6});
+    auto prompt_width = [&](const Prompt& prompt)
+    {
+        return (*prompt.icon ? icon_size + gap : 0) + text.width(prompt.title, l.small);
+    };
+    float x = l.width - margin + between;
+    for (const auto& prompt : prompts)
+    {
+        x -= prompt_width(prompt) + between;
+    }
     const float prompt_y = (compact ? l.height - l.small - 14 : bottom + (l.bar_height - l.small) / 2 - 2) - lift;
     label(margin, bottom + (compact ? 6 : (l.bar_height - l.small) / 2 - 2) - lift,
           process.active() ? (process.ready() ? "Game running" : "Preparing game...")
           : game()         ? game()->title
                            : "",
           l.small, ink, compact ? l.width - margin * 2 : x - margin - between);
-    auto prompt = [&](const char* icon, const char* title, int kind)
+    for (const auto& prompt : prompts)
     {
-        const float width = icon_size + gap + text.width(title, l.small);
-        hits.push_back({{x, prompt_y - 4, width, icon_size + 8}, kind, 0});
-        text.icon(x, prompt_y + lift - (icon_size - l.small) / 2 + 2, icon_size, icon);
-        label(x + icon_size + gap, prompt_y, title, l.small);
+        const float width = prompt_width(prompt);
+        if (prompt.kind >= 0)
+        {
+            hits.push_back({{x, prompt_y - 4, width, icon_size + 8}, prompt.kind, 0});
+        }
+        const float inset = *prompt.icon ? icon_size + gap : 0;
+        if (*prompt.icon)
+        {
+            text.icon(x, prompt_y + lift - (icon_size - l.small) / 2 + 2, icon_size, prompt.icon);
+        }
+        label(x + inset, prompt_y, prompt.title, l.small);
         x += width + between;
-    };
-    if (show_clear)
-    {
-        prompt("controller_buttons_north", "Clear", 9);
     }
-    if (show_menu)
-    {
-        if (pad)
-        {
-            hits.push_back({{x, prompt_y - 4, menu_width - between, icon_size + 8}, 10, 0});
-            label(x, prompt_y, "Start: Menu", l.small);
-            x += menu_width;
-        }
-        else
-        {
-            prompt("keyboard_escape", "Menu", 10);
-        }
-    }
-    prompt(pad ? (swap_confirm_cancel ? "controller_buttons_south" : "controller_buttons_east") : "keyboard_escape",
-           "Back", 5);
-    prompt(pad ? (swap_confirm_cancel ? "controller_buttons_east" : "controller_buttons_south") : "keyboard_enter",
-           "Select", 6);
     if (!message.empty() && SDL_GetTicks() < message_until)
     {
         const float width = l.content - l.gap * 2;
@@ -2383,7 +2406,7 @@ void Home::draw_modal()
             line(rows_top + 14, (purpose == BrowsePurpose::Archive) ? "No compatible ROM files found." : "This folder is empty.",
                  16, muted);
         }
-        const int browser_rows = std::max(1, static_cast<int>((dh - rows_top - 64) / 50));
+        const int browser_rows = std::max(1, static_cast<int>((dh - rows_top - 24) / 50));
         browser.scroll_into_view(browser_rows);
         for (int i = browser.top(); i < static_cast<int>(entries.size()) && i < browser.top() + browser_rows; ++i)
         {
@@ -2395,9 +2418,6 @@ void Home::draw_modal()
             button({x, rows_top + (i - browser.top()) * 50, inner, 38}, name, i == browser.selected(), 4, i,
                    entry.directory ? (parent ? "folder_open" : "folder") : "");
         }
-        line(dh - 38, swap_confirm_cancel
-                         ? "Enter / East: open    Left / Right: jump by letter    Esc / South: cancel"
-                         : "Enter / South: open    Left / Right: jump by letter    Esc / East: cancel", 13, muted);
         return;
     }
     if (modal == Modal::Details && game())
@@ -2475,14 +2495,6 @@ void Home::draw_modal()
                                : (modal == Modal::Menu || modal == Modal::Settings) ? 100.0f : 200.0f;
         button({x, rows_top + static_cast<float>(i) * 50, inner, 38}, value, choice == static_cast<int>(i), 3,
                static_cast<int>(i));
-    }
-    if (modal == Modal::Edit)
-    {
-        line(dh - 38,
-             typing_title ? "Arrows move. Shift selects. Ctrl+A selects all. Enter finishes."
-                          : draft.system == "generic" ? "Generic system. Core: select to browse."
-                          : "System: Left / Right to change. Core: select to browse.",
-             13, muted);
     }
 }
 } // namespace
