@@ -2368,6 +2368,7 @@ void Home::draw_modal()
     {
         const auto& folder = browser.current_folder();
         const auto& entries = browser.items();
+        const float rows_top = (purpose == BrowsePurpose::BoxArt) ? 140.0f : 114.0f;
         line(78, folder.string(), 13, muted);
         if (purpose == BrowsePurpose::BoxArt)
         {
@@ -2375,14 +2376,14 @@ void Home::draw_modal()
         }
         if (browser.loading())
         {
-            line(128, (purpose == BrowsePurpose::Archive) ? "Reading ZIP..." : "Reading folder...", 16, muted);
+            line(rows_top + 14, (purpose == BrowsePurpose::Archive) ? "Reading ZIP..." : "Reading folder...", 16, muted);
         }
         else if (entries.empty())
         {
-            line(128, (purpose == BrowsePurpose::Archive) ? "No compatible ROM files found." : "This folder is empty.",
+            line(rows_top + 14, (purpose == BrowsePurpose::Archive) ? "No compatible ROM files found." : "This folder is empty.",
                  16, muted);
         }
-        const int browser_rows = std::max(1, static_cast<int>((dh - 178) / 50));
+        const int browser_rows = std::max(1, static_cast<int>((dh - rows_top - 64) / 50));
         browser.scroll_into_view(browser_rows);
         for (int i = browser.top(); i < static_cast<int>(entries.size()) && i < browser.top() + browser_rows; ++i)
         {
@@ -2391,7 +2392,7 @@ void Home::draw_modal()
             auto name = (purpose == BrowsePurpose::Archive) ? entry.path.generic_string()
                         : parent                            ? ".. (parent folder)"
                                                             : entry.path.filename().string();
-            button({x, 114.0f + (i - browser.top()) * 50, inner, 38}, name, i == browser.selected(), 4, i,
+            button({x, rows_top + (i - browser.top()) * 50, inner, 38}, name, i == browser.selected(), 4, i,
                    entry.directory ? (parent ? "folder_open" : "folder") : "");
         }
         line(dh - 38, swap_confirm_cancel
