@@ -2,7 +2,7 @@
 
 ## Local development
 
-Python 3.12+, CMake 3.20+, a C++20 compiler, and the development packages for FreeType, Vulkan, LibArchive, SQLite, JPEG, and OpenSSL Crypto are needed. Optional Armada support (`-DCABINET_ARMADA_DRM=ON`) also needs libdrm, GBM, EGL, Wayland, wayland-scanner, and wayland-protocols. Install SDL's platform development dependencies as well if its X11/Wayland/audio backends are wanted. Git is also needed by the core-bundle tests.
+Python 3.12+, CMake 3.20+, a C++20 compiler, and the development packages for FreeType, Vulkan, LibArchive, SQLite, JPEG, libcurl, nlohmann_json, and OpenSSL Crypto are needed. Optional Armada support (`-DCABINET_ARMADA_DRM=ON`) also needs libdrm, GBM, EGL, Wayland, wayland-scanner, and wayland-protocols. Install SDL's platform development dependencies as well if its X11/Wayland/audio backends are wanted. Git is also needed by the core-bundle tests.
 
 ```sh
 python3 tools/build_sdl.py --jobs 6

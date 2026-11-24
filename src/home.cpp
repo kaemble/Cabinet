@@ -1,6 +1,7 @@
 #include "home.h"
 #include "text_edit.h"
 #include "boxart.h"
+#include "steamgriddb.h"
 #include <cstdint>
 #include <cstddef>
 #include "cli_help.h"
@@ -31,6 +32,8 @@ enum class Modal
     None,
     Menu,
     Settings,
+    ApiKey,
+    SteamGrid,
     Details,
     Edit,
     Browse,
@@ -123,11 +126,17 @@ class Home
 {
 public:
     Home(SDL_Window* window, SDL_Renderer* renderer, const fs::path& data, std::string executable,
-         HomeLogger logger = {})
+         HomeLogger logger = {}, SteamGridDB::Request artwork_request = {})
         : window(window), renderer(renderer), text(renderer), grid_titles(renderer, TextRenderer::Font::Condensed),
           boxart(renderer, data), library(data / "library.sqlite3"), process(logger), logger(logger), executable(std::move(executable)),
           data_dir(data.string())
     {
+        this->artwork_request = std::move(artwork_request);
+        const auto credentials = save_storage::read(data / "steamgriddb" / "key.conf");
+        if (credentials.contains("api_key"))
+        {
+            api_key = credentials.at("api_key");
+        }
         const auto settings = save_storage::read(fs::path(data_dir) / "home.conf");
         swap_confirm_cancel = settings.contains("swap_confirm_cancel") && settings.at("swap_confirm_cancel") == "1";
         dual_screen = settings.contains("dual_screen") && settings.at("dual_screen") == "1";
@@ -188,6 +197,29 @@ private:
     int sidebar = 0, selected = 0, focus = 0, toolbar = 0, first_row = 0;
     bool list_view = false, search = false, typing_title = false;
     bool swap_confirm_cancel = false, dual_screen = false;
+    std::string api_key, key_draft, artwork_query, queued_artwork, artwork_title;
+    SteamGridDB::Request artwork_request;
+    struct ArtworkResult
+    {
+        std::vector<SteamGridGame> games;
+        std::string image, error;
+        std::uint64_t generation = 0;
+        bool searching = false;
+    };
+    std::future<ArtworkResult> artwork_task;
+    std::vector<SteamGridGame> artwork_games;
+    std::uint64_t artwork_generation = 0, artwork_task_generation = 0;
+    bool artwork_loading() const
+    {
+        return (artwork_task.valid() && artwork_task_generation == artwork_generation) || !queued_artwork.empty();
+    }
+    void fetch_artwork(std::int64_t game_id = 0, bool automatic = false);
+    void import_artwork();
+    std::string& input_value()
+    {
+        return modal == Modal::ApiKey ? key_draft : modal == Modal::SteamGrid ? artwork_query
+               : typing_title ? draft.title : query;
+    }
     TextEdit text_edit;
     float text_scroll = 0;
     SDL_FRect text_rect{};
@@ -372,7 +404,7 @@ void Home::start_text(bool title)
 {
     typing_title = title;
     search = !title;
-    text_edit.begin(title ? draft.title : query);
+    text_edit.begin(input_value());
     text_scroll = 0;
     reset_caret();
     SDL_StartTextInput(window);
@@ -390,12 +422,16 @@ void Home::stop_text()
     SDL_StopTextInput(window);
     search = typing_title = text_dragging = false;
     next_caret = 0;
+    if (modal == Modal::Edit && !editing && !api_key.empty() && artwork_title != draft.title)
+    {
+        import_artwork();
+    }
 }
 
 void Home::place_caret(const SDL_FRect& rect, float x, bool extend)
 {
-    const auto& value = typing_title ? draft.title : query;
-    const float prefix = typing_title ? text.width("Title: ", layout.body) : 0;
+    const auto value = modal == Modal::ApiKey ? std::string(key_draft.size(), '*') : input_value();
+    const float prefix = (typing_title && modal == Modal::Edit) ? text.width("Title: ", layout.body) : 0;
     const float offset = x - rect.x - layout.gap - prefix + text_scroll;
     std::size_t position = 0;
     float previous = 0;
@@ -418,8 +454,8 @@ void Home::place_caret(const SDL_FRect& rect, float x, bool extend)
 void Home::draw_text_input(const SDL_FRect& rect)
 {
     text_rect = rect;
-    const auto& value = typing_title ? draft.title : query;
-    const auto prefix = typing_title ? std::string("Title: ") : std::string{};
+    const auto value = modal == Modal::ApiKey ? std::string(key_draft.size(), '*') : input_value();
+    const auto prefix = (typing_title && modal == Modal::Edit) ? std::string("Title: ") : std::string{};
     const int size = layout.body;
     const float y = rect.y + (rect.h - size) / 2 - size * .15f;
     const float prefix_width = text.width(prefix, size);
@@ -595,6 +631,8 @@ void Home::import_file(const fs::path& path, bool custom)
         throw std::runtime_error("Choose an existing game file.");
     }
     stop_text();
+    ++artwork_generation;
+    queued_artwork.clear();
     boxart.reset();
     draft = {};
     draft.path = fs::canonical(path).string();
@@ -610,6 +648,7 @@ void Home::import_file(const fs::path& path, bool custom)
         modal = Modal::Edit;
         choice = 2;
         folder = fs::path(draft.path).parent_path();
+        import_artwork();
         return;
     }
     if (rom_archive::is_zip(path))
@@ -627,6 +666,7 @@ void Home::import_file(const fs::path& path, bool custom)
     modal = Modal::Edit;
     choice = 0;
     folder = fs::path(draft.path).parent_path();
+    import_artwork();
 }
 void Home::browse_archive(const fs::path& path, BrowsePurpose intent)
 {
@@ -694,6 +734,7 @@ void Home::choose_file(const fs::path& path)
         modal = Modal::Edit;
         choice = 0;
         folder = fs::path(draft.path).parent_path();
+        import_artwork();
     }
     else if (purpose == BrowsePurpose::Bios)
     {
@@ -709,6 +750,8 @@ void Home::choose_file(const fs::path& path)
     }
     else if (purpose == BrowsePurpose::Custom)
     {
+        ++artwork_generation;
+        queued_artwork.clear();
         boxart.reset();
         draft = {};
         draft.system = "generic";
@@ -718,6 +761,7 @@ void Home::choose_file(const fs::path& path)
         dirty = false;
         modal = Modal::Edit;
         choice = 4;
+        import_artwork();
     }
     else if (purpose == BrowsePurpose::Content)
     {
@@ -725,10 +769,13 @@ void Home::choose_file(const fs::path& path)
         draft.title = path.stem().string();
         dirty = true;
         modal = Modal::Edit;
-        choice = 5;
+        choice = api_key.empty() ? 5 : 6;
+        import_artwork();
     }
     else if (purpose == BrowsePurpose::BoxArt)
     {
+        ++artwork_generation;
+        queued_artwork.clear();
         boxart.select(path);
         dirty = true;
         modal = Modal::Edit;
@@ -761,6 +808,16 @@ void Home::choose_file(const fs::path& path)
 }
 void Home::finish_import()
 {
+    if (artwork_loading())
+    {
+        notify("Artwork is loading. Select the SteamGridDB row to cancel, or wait before saving.");
+        return;
+    }
+    const bool duplicate = !editing && std::any_of(all.begin(), all.end(), [&](const Game& game)
+    {
+        return game.path == draft.path && game.archive_member == draft.archive_member &&
+               (!draft.path.empty() || game.core == draft.core);
+    });
     if (editing)
     {
         library.update(draft);
@@ -776,10 +833,13 @@ void Home::finish_import()
         throw std::runtime_error("Saved game was not found in the library");
     }
     draft = *saved;
-    if (editing)
+    if (!duplicate)
     {
         boxart.save(draft.save_id);
     }
+    ++artwork_generation;
+    queued_artwork.clear();
+    boxart.reset();
     cache_game(draft);
     sidebar = system_index(draft.system) + 3;
     query.clear();
@@ -803,6 +863,54 @@ void Home::set_system(int direction)
     draft.core = bundled_core(systems()[index]).string();
     dirty = true;
 }
+void Home::import_artwork()
+{
+    artwork_title = draft.title;
+    boxart.reset();
+    ++artwork_generation;
+    queued_artwork.clear();
+    if (!api_key.empty())
+    {
+        queued_artwork = draft.title;
+    }
+}
+
+void Home::fetch_artwork(std::int64_t game_id, bool automatic)
+{
+    if (artwork_task.valid())
+    {
+        notify("A SteamGridDB request is still finishing. Try again shortly.");
+        return;
+    }
+    SteamGridDB client(api_key, artwork_request);
+    const auto generation = ++artwork_generation;
+    artwork_task_generation = generation;
+    const auto title = artwork_query;
+    artwork_task = std::async(std::launch::async, [client = std::move(client), generation, title, game_id, automatic]
+    {
+        ArtworkResult result;
+        result.generation = generation;
+        result.searching = !automatic && game_id == 0;
+        try
+        {
+            if (result.searching)
+            {
+                result.games = client.search(title);
+            }
+            else
+            {
+                result.image = automatic ? client.import_image(title) : client.image(game_id);
+            }
+        }
+        catch (const std::exception& error)
+        {
+            result.error = error.what();
+        }
+        return result;
+    });
+    needs_redraw = true;
+}
+
 void Home::edit_game()
 {
     if (!game())
@@ -810,6 +918,8 @@ void Home::edit_game()
         return;
     }
     draft = *game();
+    ++artwork_generation;
+    queued_artwork.clear();
     boxart.reset();
     editing = true;
     dirty = false;
@@ -819,6 +929,8 @@ void Home::edit_game()
 void Home::close_editor()
 {
     stop_text();
+    ++artwork_generation;
+    queued_artwork.clear();
     boxart.reset();
     modal = editing ? Modal::Details : Modal::None;
     choice = 0;
@@ -827,7 +939,21 @@ std::vector<std::string> Home::modal_rows()
 {
     if (modal == Modal::Menu)
     {
-        return {"Add custom entry", "Settings", "Close Cabinet", "Back"};
+        return {"Add custom entry", "Settings", "Close Cabinet", "SteamGridDB API key", "Back"};
+    }
+    if (modal == Modal::ApiKey)
+    {
+        return {"API key: " + std::string(key_draft.size(), '*'), "Save key", "Remove key", "Cancel"};
+    }
+    if (modal == Modal::SteamGrid)
+    {
+        std::vector<std::string> rows{"Search: " + artwork_query, "Search SteamGridDB"};
+        for (const auto& game : artwork_games)
+        {
+            rows.push_back(game.name);
+        }
+        rows.push_back("Cancel search");
+        return rows;
     }
     if (modal == Modal::Settings)
     {
@@ -868,6 +994,11 @@ std::vector<std::string> Home::modal_rows()
         {
             rows.push_back("ROM: " + (draft.path.empty() ? std::string("Skip (run without content)")
                                                        : fs::path(draft.path).filename().string()));
+        }
+        if (!api_key.empty())
+        {
+            rows.push_back(artwork_loading() ? "SteamGridDB: loading... (select to cancel)"
+                           : boxart.pending() ? "SteamGridDB: image selected (search again)" : "SteamGridDB: find box art");
         }
         rows.push_back(editing ? "Save changes" : "Add to library");
         rows.push_back("Cancel");
@@ -1036,7 +1167,20 @@ void Home::back()
         choice = (intent == BrowsePurpose::BoxArt || intent == BrowsePurpose::Content) ? 4 : 0;
         return;
     }
-    if (modal == Modal::Settings)
+    if (modal == Modal::ApiKey)
+    {
+        key_draft.clear();
+        modal = Modal::Menu;
+        choice = 3;
+    }
+    else if (modal == Modal::SteamGrid)
+    {
+        ++artwork_generation;
+        queued_artwork.clear();
+        modal = Modal::Edit;
+        choice = (editing || draft.system == "generic") ? 5 : 4;
+    }
+    else if (modal == Modal::Settings)
     {
         modal = Modal::Menu;
         choice = 1;
@@ -1102,7 +1246,7 @@ void Home::request_close()
     {
         notify("Quit the game from its menu before closing the library.");
     }
-    else if (dirty && (modal == Modal::Edit || modal == Modal::Discard))
+    else if (dirty && (modal == Modal::Edit || modal == Modal::Discard || modal == Modal::SteamGrid))
     {
         stop_text();
         modal = Modal::Discard;
@@ -1130,6 +1274,65 @@ void Home::activate(bool with_controller)
         else if (choice == 2)
         {
             request_close();
+        }
+        else if (choice == 3)
+        {
+            key_draft.clear();
+            modal = Modal::ApiKey;
+            choice = 0;
+        }
+        else
+        {
+            back();
+        }
+        return;
+    }
+    if ((modal == Modal::ApiKey || modal == Modal::SteamGrid) && typing_title)
+    {
+        stop_text();
+        return;
+    }
+    if (modal == Modal::ApiKey)
+    {
+        if (choice == 0)
+        {
+            start_text(true);
+        }
+        else if (choice == 1 || choice == 2)
+        {
+            if (choice == 1)
+            {
+                SteamGridDB validate(key_draft);
+            }
+            const auto directory = fs::path(data_dir) / "steamgriddb";
+            fs::create_directories(directory);
+            fs::permissions(directory, fs::perms::owner_all);
+            const auto next_key = choice == 2 ? std::string{} : key_draft;
+            save_storage::write(directory / "key.conf", {{"api_key", next_key}});
+            fs::permissions(directory / "key.conf", fs::perms::owner_read | fs::perms::owner_write);
+            api_key = next_key;
+            back();
+            notify(api_key.empty() ? "SteamGridDB key removed" : "SteamGridDB key saved");
+        }
+        else
+        {
+            back();
+        }
+        return;
+    }
+    if (modal == Modal::SteamGrid)
+    {
+        if (choice == 0)
+        {
+            start_text(true);
+        }
+        else if (choice == 1)
+        {
+            fetch_artwork();
+        }
+        else if (choice - 2 < static_cast<int>(artwork_games.size()))
+        {
+            fetch_artwork(artwork_games[choice - 2].id);
         }
         else
         {
@@ -1266,7 +1469,24 @@ void Home::activate(bool with_controller)
         {
             start_browse(BrowsePurpose::Content);
         }
-        else if (choice == ((editing || draft.system == "generic") ? 5 : 4))
+        else if (!api_key.empty() && choice == ((editing || draft.system == "generic") ? 5 : 4))
+        {
+            if (artwork_loading())
+            {
+                ++artwork_generation;
+                queued_artwork.clear();
+                notify("Artwork search cancelled");
+                return;
+            }
+            SteamGridDB validate(api_key);
+            stop_text();
+            modal = Modal::SteamGrid;
+            choice = 1;
+            artwork_query = draft.title;
+            artwork_games.clear();
+            fetch_artwork();
+        }
+        else if (choice == ((editing || draft.system == "generic") ? 5 : 4) + (api_key.empty() ? 0 : 1))
         {
             if (!editing && (draft.system == "psx" || draft.system == "saturn") &&
                 !has_bios(draft.system, fs::path(data_dir) / "system"))
@@ -1436,7 +1656,7 @@ void Home::event(SDL_Event event)
     }
     if (event.type == SDL_EVENT_TEXT_INPUT && (search || typing_title))
     {
-        auto& target = search ? query : draft.title;
+        auto& target = input_value();
         const auto previous = target;
         text_edit.insert(target, event.text.text);
         reset_caret();
@@ -1446,9 +1666,14 @@ void Home::event(SDL_Event event)
             {
                 refilter();
             }
-            else
+            else if (modal == Modal::Edit)
             {
                 dirty = true;
+                if (!editing)
+                {
+                    ++artwork_generation;
+                    queued_artwork.clear();
+                }
             }
         }
     }
@@ -1475,7 +1700,7 @@ void Home::event(SDL_Event event)
         }
         else if (search || typing_title)
         {
-            auto& target = search ? query : draft.title;
+            auto& target = input_value();
             const auto previous = target;
             text_edit.key(target, event.key);
             reset_caret();
@@ -1485,9 +1710,14 @@ void Home::event(SDL_Event event)
                 {
                     refilter();
                 }
-                else
+                else if (modal == Modal::Edit)
                 {
                     dirty = true;
+                    if (!editing)
+                    {
+                        ++artwork_generation;
+                        queued_artwork.clear();
+                    }
                 }
             }
         }
@@ -1606,7 +1836,7 @@ void Home::event(SDL_Event event)
                 if (kind == 3)
                 {
                     choice = index;
-                    if (modal == Modal::Edit && index == 0)
+                    if ((modal == Modal::Edit || modal == Modal::ApiKey || modal == Modal::SteamGrid) && index == 0)
                     {
                         if (!typing_title)
                         {
@@ -1677,7 +1907,7 @@ int Home::wait_timeout() const
             timeout = delay;
         }
     };
-    if (browsing)
+    if (browsing || artwork_task.valid() || !queued_artwork.empty())
     {
         sooner(50);
     }
@@ -1703,6 +1933,55 @@ int Home::wait_timeout() const
 
 void Home::tick()
 {
+    if (artwork_task.valid() && artwork_task.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready)
+    {
+        auto result = artwork_task.get();
+        needs_redraw = true;
+        if (result.generation == artwork_generation)
+        {
+            if (!result.error.empty())
+            {
+                notify(result.error);
+            }
+            else if (result.searching && modal == Modal::SteamGrid)
+            {
+                artwork_games = std::move(result.games);
+                if (artwork_games.size() > 5)
+                {
+                    artwork_games.resize(5);
+                }
+                choice = artwork_games.empty() ? 1 : 2;
+                if (artwork_games.empty())
+                {
+                    notify("No matching games found on SteamGridDB");
+                }
+            }
+            else if (!result.image.empty())
+            {
+                try
+                {
+                    boxart.select_data(result.image);
+                    dirty = true;
+                    if (modal == Modal::SteamGrid)
+                    {
+                        modal = Modal::Edit;
+                        choice = (editing || draft.system == "generic") ? 5 : 4;
+                    }
+                    notify("SteamGridDB artwork selected. Save to keep it.");
+                }
+                catch (const std::exception& error)
+                {
+                    notify(error.what());
+                }
+            }
+        }
+    }
+    if (!artwork_task.valid() && !queued_artwork.empty())
+    {
+        artwork_query = std::move(queued_artwork);
+        queued_artwork.clear();
+        fetch_artwork(0, true);
+    }
     if ((search || typing_title) && (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) &&
         SDL_GetTicks() >= next_caret)
     {
@@ -2268,12 +2547,13 @@ void Home::draw_modal()
 {
     hits.clear();
     const float available_height = layout.height - layout.bar_height - layout.gap * 2;
-    const bool editing_details = modal == Modal::Edit && (editing || draft.system == "generic");
-    const float scale = std::min(layout.body / 16.0f, available_height / (editing_details ? 600.0f : 540.0f));
+    const bool editing_details = modal == Modal::Edit && (editing || draft.system == "generic" || !api_key.empty());
+    const float editor_height = api_key.empty() ? 640.0f : 720.0f;
+    const float scale = std::min(layout.body / 16.0f, available_height / (editing_details ? editor_height : 540.0f));
     const float dw = std::min(800.0f, (layout.width - layout.gap * 2) / scale);
-    const float modal_height = (modal == Modal::Menu) ? 330.0f
+    const float modal_height = (modal == Modal::Menu) ? 380.0f
                                : (modal == Modal::Settings) ? 280.0f
-                               : editing_details ? 640.0f : 590.0f;
+                               : editing_details ? editor_height : 590.0f;
     const float dh = (modal == Modal::Browse) ? available_height / scale
                                              : std::min(modal_height, available_height / scale);
     const float left = (layout.width - dw * scale) / 2;
@@ -2296,6 +2576,8 @@ void Home::draw_modal()
     box({left, top, dw * scale, dh * scale}, {32, 32, 32, 255});
     std::string title = (modal == Modal::Menu) ? "Cabinet menu"
                         : (modal == Modal::Settings) ? "Home settings"
+                        : (modal == Modal::ApiKey) ? "SteamGridDB API key"
+                        : (modal == Modal::SteamGrid) ? "Find SteamGridDB box art"
                         : (modal == Modal::Bios) ? (bios_system == "psx" ? "PlayStation BIOS" : "Sega Saturn BIOS")
                         : (modal == Modal::Browse)
                             ? ((purpose == BrowsePurpose::Archive) ? "Choose a ROM inside the ZIP"
@@ -2383,13 +2665,12 @@ void Home::draw_modal()
     }
     if (modal == Modal::Edit)
     {
-        const float width = editing ? inner - 112 : inner;
+        const float width = inner - 112;
         line(78, draft.path + (draft.archive_member.empty() ? "" : " / " + draft.archive_member), 12, muted, width);
         line(107, editing ? "Changes are applied when you save."
                           : (draft.system == "generic") ? "ROM can be skipped for cores that support running without content."
                                                         : "Choose a system and core, then confirm to save.",
              14, muted, width);
-        if (editing)
         {
             const SDL_FRect preview{left + (dw - 112) * scale, top + 74 * scale, 88 * scale, 110 * scale};
             if (!boxart.draw(draft.save_id, preview, true))
@@ -2397,6 +2678,17 @@ void Home::draw_modal()
                 text.icon(preview.x, preview.y + 11 * scale, 88 * scale, "placeholder");
             }
         }
+    }
+    if (modal == Modal::ApiKey)
+    {
+        line(80, "Get a key at steamgriddb.com/profile/preferences/api", 14, muted);
+        line(115, api_key.empty() ? "No key configured." : "A key is saved. Enter a new key to replace it.", 14, muted);
+        line(145, "Stored locally with access restricted to your user account.", 14, muted);
+    }
+    if (modal == Modal::SteamGrid)
+    {
+        line(80, "Choose a game. Alternate square covers are preferred.", 14, muted);
+        line(115, artwork_task.valid() ? "Loading from SteamGridDB..." : "Search by title, then choose a matching game.", 14, muted);
     }
     if (modal == Modal::Remove)
     {

@@ -86,6 +86,10 @@ int main()
             art.save(id);
             require(fs::exists(png) && fs::is_regular_file(art.file(id)), "Owned copy or original image missing");
             require(!art.pending() && pixel(art, false, 40, 40).r == 220, "Saved image did not invalidate the placeholder cache");
+            std::ifstream jpeg_input(jpeg, std::ios::binary);
+            const std::string jpeg_bytes{std::istreambuf_iterator<char>(jpeg_input), std::istreambuf_iterator<char>()};
+            art.select_data(jpeg_bytes);
+            require(pixel(art, true, 40, 40).g > 210, "Downloaded JPEG data did not decode");
             art.select(jpeg);
             require(pixel(art, true, 40, 40).g > 210, "JPEG preview did not decode");
             art.reset();

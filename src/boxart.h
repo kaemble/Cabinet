@@ -10,6 +10,7 @@ class BoxArt
 public:
     BoxArt(SDL_Renderer* renderer, const std::filesystem::path& data);
     void select(const std::filesystem::path& source);
+    void select_data(const std::string& data);
     void save(const std::string& game_id);
     void reset();
     bool pending() const;
@@ -17,6 +18,7 @@ public:
     std::filesystem::path file(const std::string& game_id) const;
 
 private:
+    void stage(SDL_Surface* image);
     using Surface = std::unique_ptr<SDL_Surface, decltype(&SDL_DestroySurface)>;
     using Texture = std::unique_ptr<SDL_Texture, decltype(&SDL_DestroyTexture)>;
     SDL_Renderer* renderer;

@@ -52,7 +52,7 @@ struct JpegImage
     }
 };
 
-SDL_Surface* load_jpeg(const std::filesystem::path& path)
+SDL_Surface* load_jpeg(const std::filesystem::path& path, const std::string* data = nullptr)
 {
     // Decoder state lives on the heap so libjpeg's longjmp cannot invalidate it.
     auto image = std::make_unique<JpegImage>();
@@ -68,12 +68,19 @@ SDL_Surface* load_jpeg(const std::filesystem::path& path)
         throw std::runtime_error(std::string("Could not read JPEG: ") + image->errors.message);
     }
     jpeg_create_decompress(&image->decoder);
-    image->input = std::fopen(path.c_str(), "rb");
-    if (!image->input)
+    if (data)
     {
-        throw std::runtime_error("Could not open box-art image");
+        jpeg_mem_src(&image->decoder, reinterpret_cast<const unsigned char*>(data->data()), data->size());
     }
-    jpeg_stdio_src(&image->decoder, image->input);
+    else
+    {
+        image->input = std::fopen(path.c_str(), "rb");
+        if (!image->input)
+        {
+            throw std::runtime_error("Could not open box-art image");
+        }
+        jpeg_stdio_src(&image->decoder, image->input);
+    }
     jpeg_read_header(&image->decoder, TRUE);
     if (image->decoder.image_width > 8192 || image->decoder.image_height > 8192)
     {
@@ -141,6 +148,19 @@ void BoxArt::select(const std::filesystem::path& source)
     const auto suffix = extension(source);
     Surface image(suffix == ".png" ? SDL_LoadPNG(source.c_str())
                   : suffix == ".bmp" ? SDL_LoadBMP(source.c_str()) : load_jpeg(source), SDL_DestroySurface);
+    stage(image.release());
+}
+
+void BoxArt::select_data(const std::string& data)
+{
+    const bool jpeg = data.size() >= 2 && static_cast<unsigned char>(data[0]) == 0xff &&
+                      static_cast<unsigned char>(data[1]) == 0xd8;
+    stage(jpeg ? load_jpeg({}, &data) : SDL_LoadPNG_IO(SDL_IOFromConstMem(data.data(), data.size()), true));
+}
+
+void BoxArt::stage(SDL_Surface* surface)
+{
+    Surface image(surface, SDL_DestroySurface);
     if (!image)
     {
         throw std::runtime_error(std::string("Could not read box-art image: ") + SDL_GetError());

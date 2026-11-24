@@ -2,7 +2,7 @@
 
 ## Import and organize
 
-Press **Start** on a controller, **Esc** on the keyboard, or click **Menu** in the bottom bar to open Home's menu. It contains **Add custom entry**, **Settings**, and **Close Cabinet**. Close the running game before closing Cabinet.
+Press **Start** on a controller, **Esc** on the keyboard, or click **Menu** in the bottom bar to open Home's menu. It contains **Add custom entry**, **Settings**, **Close Cabinet**, and **SteamGridDB API key**. Close the running game before closing Cabinet.
 
 **Add custom entry** asks for a core first. Select the **ROM** row to choose a file of any type, or leave it skipped and choose **Add to library** for a contentless core (`supports_no_game = "true"`). The runner checks that the core supports running without content. Custom entries use the generic system and appear under **Others** in the sidebar; that tab is hidden when there are no custom entries. ZIP files added this way are passed directly to the selected core without extraction. The core must support the chosen file.
 
@@ -13,6 +13,12 @@ Select a system in the sidebar, then choose **Add game** or press **I**. Draggin
 Open a game's details to play, edit its title or core, mark it as a favorite, locate a moved file, or remove it. Removal leaves ROMs and saves untouched. Locate file preserves the game's identity and metadata. Importing an existing canonical path selects its entry; same-named files in different folders remain separate games.
 
 Choose **Edit details → Box art: choose image** to select a PNG, JPEG, or BMP cover. The editor previews the image; **Save changes** replaces the library placeholder or previous cover. Cancelling discards the selection. Cabinet stores its own PNG copy under `~/.local/share/cabinet/boxart/<game identity>.png`, preserving the aspect ratio and limiting the longest side to 1024 pixels. Moving or deleting the source image does not affect the saved cover. Title edits and ROM relocation keep the same art.
+
+Choose **Menu → SteamGridDB API key** to save, replace, or remove your [SteamGridDB API key](https://www.steamgriddb.com/profile/preferences/api). Cabinet stores it locally in `steamgriddb/key.conf` under the data directory, inside a directory accessible only to your user account. The key is masked in the menu and is sent only to the API, never to artwork downloads.
+
+With a key configured, importing a game automatically searches SteamGridDB using the game title (the selected ROM member's title for ZIP files). Cabinet prefers an exact title match, otherwise the first search result. It requests static PNG/JPEG grids in this order: **Alternate** square grids (512×512 or 1024×1024), other square grids, then other dimensions. Downloaded art is previewed and saved with **Add to library**. A failed lookup leaves the import available without artwork; selecting the loading SteamGridDB row cancels the lookup. Duplicate imports preserve existing art.
+
+The **SteamGridDB: find box art** row in import review and Edit details searches with the current title. You can edit the search query and choose a matching game. The preferred cover is staged until you save; cancelling the editor discards it. Existing games can still use the local image chooser.
 
 The sidebar includes system counts, All games, Favorites, and Recently played. Search with **F** or the search box; Enter/Escape finishes entry. Search and title fields support a movable cursor: Left/Right and Home/End move it, Shift selects text, and Ctrl+Left/Right moves by word. Backspace/Delete remove text around the cursor; holding Ctrl deletes a word. Ctrl+A selects all, and Ctrl+C/X/V copy, cut, and paste. Click to position the cursor or drag to select; long fields scroll to keep the cursor visible. The view button switches grid/list views. Games without box art use placeholders, and view/search choices last for the session.
 
