@@ -145,7 +145,7 @@ struct VulkanPass : ShaderPass
         set_info.pBindings = &binding;
         check(vkCreateDescriptorSetLayout(device, &set_info, nullptr, &bindings));
         const auto constant_size =
-            static_cast<std::uint32_t>((shaders::parameter_vector_count(effect) + 2) * 4 * sizeof(float));
+            static_cast<std::uint32_t>((shaders::parameter_vector_count(effect) + 3) * 4 * sizeof(float));
         VkPushConstantRange constants{VK_SHADER_STAGE_FRAGMENT_BIT, 0, constant_size};
         VkPipelineLayoutCreateInfo layout_info{};
         layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -438,12 +438,12 @@ struct VulkanPass : ShaderPass
         vkCmdSetScissor(slot.command, 0, 1, &scissor);
         const auto values = shaders::uniform_values(settings);
         const auto size = shaders::parameter_vector_count(effect) * 4;
-        std::array<float, (shaders::maximum_parameter_vectors + 2) * 4> parameters{};
+        std::array<float, (shaders::maximum_parameter_vectors + 3) * 4> parameters{};
         std::copy_n(values.begin(), size, parameters.begin());
-        const auto source_values = shader_source_values(input, crop, flipped, frame_count);
+        const auto source_values = shader_source_values(input, crop, flipped, frame_count, width, height);
         std::copy(source_values.begin(), source_values.end(), parameters.begin() + size);
         vkCmdPushConstants(slot.command, layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-                           static_cast<std::uint32_t>((size + 8) * sizeof(float)), parameters.data());
+                           static_cast<std::uint32_t>((size + 12) * sizeof(float)), parameters.data());
         vkCmdDraw(slot.command, 3, 1, 0, 0);
         vkCmdEndRenderPass(slot.command);
         check(vkEndCommandBuffer(slot.command));

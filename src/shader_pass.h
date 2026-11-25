@@ -5,14 +5,15 @@
 #include <array>
 #include <memory>
 
-// Source scale and half-texel bounds, followed by animation and the native texture offset.
-inline std::array<float, 8> shader_source_values(SDL_Texture* input, const SDL_FRect& source, bool flipped,
-                                                unsigned frame_count)
+// Source scale and half-texel bounds, followed by animation, native texture offset, and output/input dimensions.
+inline std::array<float, 12> shader_source_values(SDL_Texture* input, const SDL_FRect& source, bool flipped,
+                                                unsigned frame_count, unsigned output_width, unsigned output_height)
 {
     float width, height;
     SDL_GetTextureSize(input, &width, &height);
     return {source.w / width, (flipped ? -source.h : source.h) / height, 0.5f / source.w, 0.5f / source.h,
-            float(frame_count % 65536), source.x / width, (source.y + (flipped ? source.h : 0)) / height, 0};
+            float(frame_count % 65536), source.x / width, (source.y + (flipped ? source.h : 0)) / height, 0,
+            float(output_width), float(output_height), source.w, source.h};
 }
 
 class ShaderPass

@@ -910,7 +910,7 @@ std::vector<std::string> Frontend::rows() const
         for (std::size_t i = 0; i < shader_parameters().size(); ++i)
         {
             result.push_back(std::string(shader_parameters()[i].name) + ": " +
-                             std::to_string(shader.parameters[i]) + shader_parameters()[i].suffix);
+                             shaders::parameter_value(shader_parameters()[i], shader.parameters[i]));
         }
         result.push_back("Restore defaults");
         result.push_back("Back");
@@ -923,7 +923,7 @@ std::vector<std::string> Frontend::rows() const
         const int current = shaders.effects.at(shader_selection).parameters[shader_parameter];
         for (int value = parameter.minimum; value <= parameter.maximum; value += parameter.step)
         {
-            result.push_back(std::to_string(value) + parameter.suffix + ((value == current) ? " (current)" : ""));
+            result.push_back(shaders::parameter_value(parameter, value) + ((value == current) ? " (current)" : ""));
         }
         result.push_back("Back");
         return result;

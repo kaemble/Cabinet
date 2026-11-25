@@ -62,7 +62,7 @@ struct GlPass : ShaderPass
     SDL_GLContext context;
     bool es;
     GLuint program = 0, buffer = 0, framebuffer = 0, output = 0;
-    GLint frame_uniform = -1, values_uniform = -1, source_uniform = -1, context_uniform = -1;
+    GLint frame_uniform = -1, values_uniform = -1, source_uniform = -1, context_uniform = -1, target_uniform = -1;
     SDL_Texture* texture = nullptr;
     unsigned width = 0, height = 0;
 
@@ -220,6 +220,7 @@ struct GlPass : ShaderPass
         values_uniform = uniform_location(program, "values[0]");
         source_uniform = uniform_location(program, "source");
         context_uniform = uniform_location(program, "context");
+        target_uniform = uniform_location(program, "target");
         GLint previous_buffer;
         get_integer(GL_ARRAY_BUFFER_BINDING, &previous_buffer);
         constexpr std::array<float, 6> vertices{-1, -1, 3, -1, -1, 3};
@@ -339,11 +340,12 @@ struct GlPass : ShaderPass
             bind_texture(GL_TEXTURE_2D, static_cast<GLuint>(native));
             use_program(program);
             const auto values = shaders::uniform_values(settings);
-            const auto source = shader_source_values(input, crop, flipped, frame_count);
+            const auto source = shader_source_values(input, crop, flipped, frame_count, width, height);
             uniform_1i(frame_uniform, 0);
             uniform_4fv(values_uniform, static_cast<GLsizei>(shaders::parameter_vector_count(effect)), values.data());
             uniform_4fv(source_uniform, 1, source.data());
             uniform_4fv(context_uniform, 1, source.data() + 4);
+            uniform_4fv(target_uniform, 1, source.data() + 8);
             bind_buffer(GL_ARRAY_BUFFER, buffer);
             attribute_pointer(0, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
             enable_attribute(0);

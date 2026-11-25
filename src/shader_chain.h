@@ -13,9 +13,10 @@ class ShaderChain
     ShaderChain(const ShaderChain&) = delete;
     ShaderChain& operator=(const ShaderChain&) = delete;
     static bool supported(SDL_Renderer* renderer);
-    // Crop is in input-texture pixels. Active chains return an upright texture at the crop's resolution.
+    // Crop is in input-texture pixels. Active chains return an upright texture at the last effect’s resolution.
     SDL_Texture* draw(SDL_Renderer* renderer, SDL_Texture* input, unsigned width, unsigned height,
-                      const shaders::Stack& settings, const SDL_FRect* crop = nullptr, bool flipped = false);
+                      const shaders::Stack& settings, const SDL_FRect* crop = nullptr, bool flipped = false,
+                      SDL_Point output_size = {});
     void reset();
     bool allocated() const;
 

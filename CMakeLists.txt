@@ -40,8 +40,10 @@ target_compile_features(cabinet_text PUBLIC cxx_std_20)
 target_include_directories(cabinet_text PUBLIC src)
 target_link_libraries(cabinet_text PUBLIC SDL3::SDL3-static Freetype::Freetype)
 install(FILES assets/fonts/OFL.txt DESTINATION ${CMAKE_INSTALL_DATADIR}/cabinet/fonts)
-install(FILES third_party/SDL-LICENSE.txt third_party/film-noise-LICENSE.txt
+install(FILES third_party/SDL-LICENSE.txt third_party/film-noise-LICENSE.txt third_party/CAS-LICENSE.txt
+  third_party/CRT-Geom-LICENSE.txt
   DESTINATION ${CMAKE_INSTALL_DATADIR}/cabinet/licenses)
+install(FILES LICENSE DESTINATION ${CMAKE_INSTALL_DATADIR}/cabinet/licenses RENAME GPL-3.0.txt)
 
 set(CABINET_SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/shaders")
 file(GLOB CABINET_EFFECT_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/effects/*.glsl")

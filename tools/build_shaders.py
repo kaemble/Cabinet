@@ -26,10 +26,12 @@ def parse_shader(source):
         raise ValueError("Shader name must be a nonempty string")
     if type(metadata.get("context", False)) is not bool:
         raise ValueError("Shader context must be a boolean")
+    if metadata.get("resolution", "source") not in ("source", "output"):
+        raise ValueError("Shader resolution must be source or output")
     parameters = metadata["parameters"]
-    # Reserve two vec4s for source extent and animation within Vulkan's guaranteed 128-byte push constants.
-    if not 1 <= len(parameters) <= 24:
-        raise ValueError("Shaders must define between 1 and 24 parameters")
+    # Reserve three vec4s for source extent, animation and output dimensions within Vulkan's guaranteed 128-byte push constants.
+    if not 1 <= len(parameters) <= 20:
+        raise ValueError("Shaders must define between 1 and 20 parameters")
     symbols = set()
     for parameter in parameters:
         symbol = parameter["symbol"]
@@ -51,6 +53,12 @@ def parse_shader(source):
             raise ValueError("Parameter range and default must align with its step")
         if not isinstance(parameter.get("suffix", "%"), str):
             raise ValueError("Parameter suffix must be a string")
+        display_scale = parameter.get("display_scale", 1)
+        if type(display_scale) not in (int, float) or not math.isfinite(display_scale) or display_scale <= 0:
+            raise ValueError("Parameter display scale must be finite and positive")
+        decimals = parameter.get("decimals", 0)
+        if type(decimals) is not int or not 0 <= decimals <= 3:
+            raise ValueError("Parameter decimals must be between zero and three")
         scale = parameter["scale"]
         if type(scale) not in (int, float) or not math.isfinite(scale) or scale <= 0:
             raise ValueError("Parameter scale must be finite and positive")
@@ -79,6 +87,8 @@ enum class Effect
     int minimum, maximum, step, initial;
     float scale;
     const char* suffix;
+    float display_scale;
+    int decimals;
 };
 struct Definition
 {
@@ -86,6 +96,7 @@ struct Definition
     const char* id;
     const char* name;
     std::span<const Parameter> parameters;
+    bool output_resolution;
 };
 """
     maximum_vectors = max((len(metadata["parameters"]) + 3) // 4 for metadata in catalog)
@@ -96,12 +107,13 @@ struct Definition
         for parameter in parameters:
             fields = [json.dumps(parameter[key]) for key in ("name", "description")]
             fields += [str(parameter[key]) for key in ("minimum", "maximum", "step", "initial")]
-            fields += [f'{float(parameter["scale"])}f', json.dumps(parameter.get("suffix", "%"))]
+            fields += [f'{float(parameter["scale"])}f', json.dumps(parameter.get("suffix", "%")),
+                       f'{float(parameter.get("display_scale", 1))}f', str(parameter.get("decimals", 0))]
             result += "    {" + ", ".join(fields) + "},\n"
         result += "}};\n"
     result += f"inline constexpr std::array<Definition, {len(catalog)}> definitions{{{{\n"
     for metadata in catalog:
-        result += f'    {{Effect::{effect_name(metadata)}, {json.dumps(metadata["id"])}, {json.dumps(metadata["name"])}, {metadata["id"]}_parameters}},\n'
+        result += f'    {{Effect::{effect_name(metadata)}, {json.dumps(metadata["id"])}, {json.dumps(metadata["name"])}, {metadata["id"]}_parameters, {str(metadata.get("resolution") == "output").lower()}}},\n'
     result += """}};
 inline const Definition& definition(Effect effect)
 {
@@ -125,7 +137,7 @@ void main()
 """
     fragment = """#version 450
 layout(binding=0) uniform sampler2D frame;
-""" + f"layout(push_constant) uniform Parameters {{ vec4 values[{count}]; vec4 source; vec4 context; }} p;\n" + """layout(location=0) in vec2 uv;
+""" + f"layout(push_constant) uniform Parameters {{ vec4 values[{count}]; vec4 source; vec4 context; vec4 target; }} p;\n" + """layout(location=0) in vec2 uv;
 layout(location=0) out vec4 color;
 """
     gl_vertex = """attribute vec2 position;
@@ -138,14 +150,17 @@ void main()
 """
     gl_fragment = """varying vec2 uv;
 uniform sampler2D frame;
-""" + f"uniform vec4 values[{count}];\n" + "uniform vec4 source;\nuniform vec4 context;\n"
+""" + f"uniform vec4 values[{count}];\n" + "uniform vec4 source;\nuniform vec4 context;\nuniform vec4 target;\n"
     for vulkan in (True, False):
         prefix = "p." if vulkan else ""
         texture = "texture" if vulkan else "texture2D"
         output = "color" if vulkan else "gl_FragColor"
         helper = ""
         if metadata.get("context", False):
-            helper = "vec3 sample_frame(vec2 position)\n{\n"
+            helper = f"vec2 frame_texel_size()\n{{\n    return 2.0 * {prefix}source.zw;\n}}\n"
+            helper += f"vec2 frame_size()\n{{\n    return {prefix}target.zw;\n}}\n"
+            helper += f"vec2 output_size()\n{{\n    return {prefix}target.xy;\n}}\n"
+            helper += "vec3 sample_frame(vec2 position)\n{\n"
             helper += f"    return {texture}(frame, {prefix}context.yz + clamp(position, {prefix}source.zw, vec2(1.0) - {prefix}source.zw) * {prefix}source.xy).rgb;\n}}\n"
         arguments = [f"{texture}(frame, {prefix}context.yz + uv * {prefix}source.xy).rgb"]
         if metadata.get("context", False):

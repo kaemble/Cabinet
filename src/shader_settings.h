@@ -6,11 +6,19 @@
 #include <iomanip>
 #include <istream>
 #include <ostream>
+#include <sstream>
 #include <string>
 #include <vector>
 
 namespace shaders
 {
+inline std::string parameter_value(const Parameter& parameter, int value)
+{
+    std::ostringstream out;
+    out << std::fixed << std::setprecision(parameter.decimals) << value * parameter.display_scale << parameter.suffix;
+    return out.str();
+}
+
 struct Shader
 {
     Effect effect;

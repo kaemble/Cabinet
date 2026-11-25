@@ -5,6 +5,7 @@
 #include "settings_store.h"
 #include "ui_text.h"
 #include "virtual_gamepad.h"
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <filesystem>
@@ -26,11 +27,20 @@ static void key(Frontend& ui, SDL_Scancode code)
     event.key.scancode = code;
     ui.event(event);
 }
+static int effect_index(const shaders::Stack& stack, shaders::Effect effect)
+{
+    const auto found = std::find_if(stack.effects.begin(), stack.effects.end(),
+                                    [&](const shaders::Shader& shader) { return shader.effect == effect; });
+    require(found != stack.effects.end(), "Effect is missing from the catalog");
+    return static_cast<int>(found - stack.effects.begin());
+}
+
 static shaders::Stack test_stack()
 {
     shaders::Stack result;
     result.effects = {shaders::Shader(shaders::Effect::ColorCorrection), shaders::Shader(shaders::Effect::FilmNoise),
-                      shaders::Shader(shaders::Effect::ChromaticAberration), shaders::Shader(shaders::Effect::Vignette)};
+                      shaders::Shader(shaders::Effect::ChromaticAberration), shaders::Shader(shaders::Effect::Vignette),
+                      shaders::Shader(shaders::Effect::Cas), shaders::Shader(shaders::Effect::CrtGeom)};
     return result;
 }
 
@@ -124,6 +134,11 @@ static void controls()
     snapshot.values.shaders.effects[2].parameters = {10, -10, 20, -20, 30, -30};
     snapshot.values.shaders.effects[3].enabled = true;
     snapshot.values.shaders.effects[3].parameters = {65};
+    snapshot.values.shaders.effects[4].enabled = true;
+    snapshot.values.shaders.effects[4].parameters = {35, 75};
+    snapshot.values.shaders.effects[5].enabled = true;
+    snapshot.values.shaders.effects[5].parameters[4] = 0;
+    snapshot.values.shaders.effects[5].parameters[14] = 35;
     std::swap(snapshot.values.shaders.effects[0], snapshot.values.shaders.effects[1]);
     settings_store::write_game(directory, snapshot);
     RunnerOptions restored;
@@ -193,7 +208,7 @@ static void film_controls()
 {
     Frontend ui;
     ui.shaders = test_stack();
-    require(ui.shaders.effects.size() == 4 && ui.shaders.effects[1].effect == shaders::Effect::FilmNoise,
+    require(ui.shaders.effects.size() == 6 && ui.shaders.effects[1].effect == shaders::Effect::FilmNoise,
             "Film grain is missing from the catalog");
     const auto defaults = ui.shaders.effects[1].parameters;
     ui.page = Page::Shaders;
@@ -238,10 +253,10 @@ static void film_controls()
 
     Frontend chromatic;
     chromatic.page = Page::Shaders;
-    chromatic.selected = 0;
-    require(chromatic.shaders.effects[0].effect == shaders::Effect::ChromaticAberration,
+    chromatic.selected = effect_index(chromatic.shaders, shaders::Effect::ChromaticAberration);
+    require(chromatic.shaders.effects[chromatic.selected].effect == shaders::Effect::ChromaticAberration,
             "Chromatic aberration is missing from the catalog");
-    const auto chromatic_defaults = chromatic.shaders.effects[0].parameters;
+    const auto chromatic_defaults = chromatic.shaders.effects[chromatic.selected].parameters;
     key(chromatic, SDL_SCANCODE_DELETE);
     key(chromatic, SDL_SCANCODE_RETURN);
     chromatic.selected = 4;
@@ -251,13 +266,14 @@ static void film_controls()
             "Chromatic aberration did not expose independent RGB offsets");
     chromatic.selected = 6;
     key(chromatic, SDL_SCANCODE_RETURN);
-    require(chromatic.shaders.effects[0].parameters == chromatic_defaults && !chromatic.shaders.effects[2].enabled,
+    require(chromatic.shaders.effects[0].parameters == chromatic_defaults &&
+                !chromatic.shaders.effects[effect_index(chromatic.shaders, shaders::Effect::FilmNoise)].enabled,
             "Chromatic defaults affected film grain");
 
     Frontend vignette;
     vignette.page = Page::Shaders;
-    vignette.selected = 3;
-    require(vignette.shaders.effects[3].effect == shaders::Effect::Vignette && !vignette.shaders.active(),
+    vignette.selected = effect_index(vignette.shaders, shaders::Effect::Vignette);
+    require(vignette.shaders.effects[vignette.selected].effect == shaders::Effect::Vignette && !vignette.shaders.active(),
             "Vignette must be a separate disabled effect");
     key(vignette, SDL_SCANCODE_DELETE);
     key(vignette, SDL_SCANCODE_RETURN);
@@ -267,8 +283,54 @@ static void film_controls()
     vignette.selected = 1;
     key(vignette, SDL_SCANCODE_RETURN);
     require(vignette.shaders.effects[0].parameters == std::vector<int>({100}) &&
-                !vignette.shaders.effects[3].enabled,
+                !vignette.shaders.effects[effect_index(vignette.shaders, shaders::Effect::FilmNoise)].enabled,
             "Vignette defaults affected film grain");
+}
+
+static void cas_controls()
+{
+    Frontend ui;
+    ui.page = Page::Shaders;
+    ui.selected = effect_index(ui.shaders, shaders::Effect::Cas);
+    require(!ui.shaders.active() && ui.shaders.effects[ui.selected].parameters == std::vector<int>({0, 100}),
+            "CAS defaults differ from the reference");
+    key(ui, SDL_SCANCODE_RETURN);
+    require(ui.page == Page::Shaders, "Inactive CAS controls were accessible");
+    key(ui, SDL_SCANCODE_DELETE);
+    key(ui, SDL_SCANCODE_RETURN);
+    key(ui, SDL_SCANCODE_RIGHT);
+    require(ui.shaders.effects[0].parameters[0] == 5, "CAS contrast adjustment failed");
+    ui.selected = 1;
+    key(ui, SDL_SCANCODE_LEFT);
+    require(ui.shaders.effects[0].parameters[1] == 95, "CAS intensity adjustment failed");
+    ui.selected = 2;
+    key(ui, SDL_SCANCODE_RETURN);
+    require(ui.shaders.effects[0].parameters == std::vector<int>({0, 100}), "CAS restore defaults failed");
+}
+
+static void crt_controls()
+{
+    Frontend ui;
+    ui.page = Page::Shaders;
+    ui.selected = effect_index(ui.shaders, shaders::Effect::CrtGeom);
+    const auto defaults = ui.shaders.effects[ui.selected].parameters;
+    const auto& definition = shaders::definition(shaders::Effect::CrtGeom);
+    require(defaults.size() == 18 && definition.output_resolution && !ui.shaders.active(),
+            "CRT-Geom must be a disabled output-resolution effect with all 18 controls");
+    require(shaders::parameter_value(definition.parameters[0], 24) == "2.4" &&
+                shaders::parameter_value(definition.parameters[6], 30) == "0.030" &&
+                shaders::parameter_value(definition.parameters[8], -5) == "-0.05 rad",
+            "CRT floating-point controls were not formatted in their actual units");
+    key(ui, SDL_SCANCODE_DELETE);
+    key(ui, SDL_SCANCODE_RETURN);
+    key(ui, SDL_SCANCODE_RIGHT);
+    require(ui.shaders.effects[0].parameters[0] == 25, "CRT gamma adjustment failed");
+    ui.selected = 8;
+    key(ui, SDL_SCANCODE_LEFT);
+    require(ui.shaders.effects[0].parameters[8] == -5, "CRT tilt adjustment failed");
+    ui.selected = 18;
+    key(ui, SDL_SCANCODE_RETURN);
+    require(ui.shaders.effects[0].parameters == defaults, "CRT restore defaults failed");
 }
 
 static std::array<int, 3> corrected(std::array<int, 3> input, const shaders::Shader& shader)
@@ -288,6 +350,50 @@ static std::array<int, 3> corrected(std::array<int, 3> input, const shaders::Sha
     }
     return output;
 }
+static std::array<int, 3> cas_reference(const std::vector<std::array<int, 3>>& image, int width, int height,
+                                         int x, int y, int contrast, int sharpening)
+{
+    if (!sharpening)
+    {
+        return image[y * width + x];
+    }
+    std::array<std::array<double, 3>, 9> neighborhood{};
+    for (int dy = -1; dy <= 1; ++dy)
+    {
+        for (int dx = -1; dx <= 1; ++dx)
+        {
+            const auto& pixel = image[std::clamp(y + dy, 0, height - 1) * width + std::clamp(x + dx, 0, width - 1)];
+            auto& sample = neighborhood[(dy + 1) * 3 + dx + 1];
+            for (int channel = 0; channel < 3; ++channel)
+            {
+                const double value = pixel[channel] / 255.0;
+                sample[channel] = value <= .04045 ? value / 12.92 : std::pow((value + .055) / 1.055, 2.4);
+            }
+        }
+    }
+    std::array<int, 3> result{};
+    for (int channel = 0; channel < 3; ++channel)
+    {
+        std::array<double, 9> samples{};
+        for (std::size_t i = 0; i < samples.size(); ++i)
+        {
+            samples[i] = neighborhood[i][channel];
+        }
+        const double cross_min = std::min({samples[1], samples[3], samples[4], samples[5], samples[7]});
+        const double cross_max = std::max({samples[1], samples[3], samples[4], samples[5], samples[7]});
+        const double minimum = cross_min + *std::min_element(samples.begin(), samples.end());
+        const double maximum = cross_max + *std::max_element(samples.begin(), samples.end());
+        const double amplitude = std::clamp(std::min(minimum, 2 - maximum) / std::max(maximum, .0001), 0.0, 1.0);
+        const double weight = amplitude > 0 ? -1 / ((1 / std::sqrt(amplitude)) * (8 - 3 * contrast / 100.0)) : 0;
+        const double filtered = std::clamp(((samples[1] + samples[3] + samples[5] + samples[7]) * weight + samples[4]) /
+                                               (1 + 4 * weight), 0.0, 1.0);
+        const double value = samples[4] + (filtered - samples[4]) * sharpening / 100.0;
+        const double encoded = value <= .0031308 ? value * 12.92 : 1.055 * std::pow(value, 1 / 2.4) - .055;
+        result[channel] = static_cast<int>(std::round(std::clamp(encoded, 0.0, 1.0) * 255));
+    }
+    return result;
+}
+
 static void pixels(const char* driver)
 {
     auto* window = SDL_CreateWindow("Shader pixels", 64, 64, 0);
@@ -709,6 +815,514 @@ static void viewport_pixels(const char* driver)
     SDL_DestroyWindow(window);
 }
 
+static void cas_pixels(const char* driver)
+{
+    auto* window = SDL_CreateWindow("CAS pixels", 64, 64, 0);
+    require(window, SDL_GetError());
+    auto* renderer = SDL_CreateRenderer(window, driver);
+    require(renderer, SDL_GetError());
+    bool saw_sharpening = false, saw_contrast_adaptation = false;
+    {
+        GamePresentation presentation;
+        const unsigned frame_width = 20, frame_height = 24, texture_width = 28, texture_height = 32;
+        for (const auto size : {SDL_Point{9, 7}, SDL_Point{1, 1}})
+        {
+            const SDL_FRect crop{3, 8, float(size.x), float(size.y)};
+            for (auto format : {SDL_PIXELFORMAT_RGBA32, SDL_PIXELFORMAT_RGB565})
+            {
+                for (bool flipped : {false, true})
+                {
+                    auto* input = SDL_CreateTexture(renderer, format, SDL_TEXTUREACCESS_STREAMING,
+                                                    texture_width, texture_height);
+                    require(input, SDL_GetError());
+                    SDL_SetTextureBlendMode(input, SDL_BLENDMODE_NONE);
+                    for (int pattern = 0; pattern < 5; ++pattern)
+                    {
+                        std::vector<Uint8> pixels(texture_width * texture_height * 4);
+                        for (unsigned i = 0; i < texture_width * texture_height; ++i)
+                        {
+                            pixels[i * 4] = pixels[i * 4 + 2] = pixels[i * 4 + 3] = 255;
+                        }
+                        for (int y = 0; y < size.y; ++y)
+                        {
+                            for (int x = 0; x < size.x; ++x)
+                            {
+                                const unsigned storage_y = flipped ? frame_height - 1 - (8 + y) : 8 + y;
+                                for (int channel = 0; channel < 3; ++channel)
+                                {
+                                    const int value = pattern == 0 ? 0 : pattern == 1 ? 255 : pattern == 2 ? 128
+                                                      : pattern == 3 ? channel * 127
+                                                                     : 32 + ((x * 3 + y * 5 + channel * 2) % 7) * 32;
+                                    pixels[(storage_y * texture_width + 3 + x) * 4 + channel] = value;
+                                }
+                            }
+                        }
+                        const int pitch = texture_width * SDL_BYTESPERPIXEL(format);
+                        std::vector<Uint8> upload(pitch * texture_height);
+                        require(SDL_ConvertPixels(texture_width, texture_height, SDL_PIXELFORMAT_RGBA32, pixels.data(),
+                                                   texture_width * 4, format, upload.data(), pitch), SDL_GetError());
+                        require(SDL_ConvertPixels(texture_width, texture_height, format, upload.data(), pitch,
+                                                   SDL_PIXELFORMAT_RGBA32, pixels.data(), texture_width * 4), SDL_GetError());
+                        require(SDL_UpdateTexture(input, nullptr, upload.data(), pitch), SDL_GetError());
+                        std::vector<std::array<int, 3>> image(size.x * size.y);
+                        for (int y = 0; y < size.y; ++y)
+                        {
+                            for (int x = 0; x < size.x; ++x)
+                            {
+                                const unsigned storage_y = flipped ? frame_height - 1 - (8 + y) : 8 + y;
+                                for (int channel = 0; channel < 3; ++channel)
+                                {
+                                    image[y * size.x + x][channel] = pixels[(storage_y * texture_width + 3 + x) * 4 + channel];
+                                }
+                            }
+                        }
+                        for (int order = 0; order < 3; ++order)
+                        {
+                            shaders::Stack settings;
+                            settings.effects = {shaders::Shader(shaders::Effect::Cas),
+                                                shaders::Shader(shaders::Effect::ColorCorrection)};
+                            settings.effects[0].enabled = true;
+                            settings.effects[1].enabled = order != 0;
+                            settings.effects[1].parameters[0] = 20;
+                            if (order == 2)
+                            {
+                                std::swap(settings.effects[0], settings.effects[1]);
+                            }
+                            const auto cas = effect_index(settings, shaders::Effect::Cas);
+                            const auto color = effect_index(settings, shaders::Effect::ColorCorrection);
+                            auto neighborhood = image;
+                            if (order == 2)
+                            {
+                                for (auto& pixel : neighborhood)
+                                {
+                                    pixel = corrected(pixel, settings.effects[color]);
+                                }
+                            }
+                            std::vector<std::array<int, 3>> default_pixels;
+                            for (const auto parameters : {std::array<int, 2>{0, 0}, {0, 100}, {100, 100}, {50, 35}})
+                            {
+                                settings.effects[cas].parameters = {parameters[0], parameters[1]};
+                                GamePresentation::Image frame;
+                                frame.texture = input;
+                                frame.width = frame_width;
+                                frame.height = frame_height;
+                                frame.scaling = 0;
+                                frame.flipped = flipped;
+                                frame.shaders = &settings;
+                                presentation.draw(renderer, frame, {0, 0, float(size.x), float(size.y)}, &crop);
+                                auto* surface = SDL_RenderReadPixels(renderer, nullptr);
+                                require(surface, SDL_GetError());
+                                std::vector<std::array<int, 3>> actual(size.x * size.y);
+                                for (int y = 0; y < size.y; ++y)
+                                {
+                                    for (int x = 0; x < size.x; ++x)
+                                    {
+                                        auto expected = cas_reference(neighborhood, size.x, size.y, x, y,
+                                                                       parameters[0], parameters[1]);
+                                        if (order == 1)
+                                        {
+                                            expected = corrected(expected, settings.effects[color]);
+                                        }
+                                        Uint8 r, g, b, a;
+                                        require(SDL_ReadSurfacePixel(surface, x, y, &r, &g, &b, &a), SDL_GetError());
+                                        actual[y * size.x + x] = {r, g, b};
+                                        for (int channel = 0; channel < 3; ++channel)
+                                        {
+                                            if (std::abs(actual[y * size.x + x][channel] - expected[channel]) > 3)
+                                            {
+                                                std::cerr << driver << " CAS pattern " << pattern << " order " << order
+                                                          << " flipped " << flipped << " contrast " << parameters[0]
+                                                          << " intensity " << parameters[1] << " pixel " << x << ',' << y
+                                                          << " channel " << channel << " got " << actual[y * size.x + x][channel]
+                                                          << " expected " << expected[channel] << '\n';
+                                                throw std::runtime_error("CAS differs from the linear-light reference");
+                                            }
+                                        }
+                                    }
+                                }
+                                SDL_DestroySurface(surface);
+                                require(SDL_RenderPresent(renderer), SDL_GetError());
+                                if (order == 0 && pattern == 4 && size.x > 1)
+                                {
+                                    saw_sharpening |= parameters[1] > 0 && actual != image;
+                                    if (parameters == std::array<int, 2>{0, 100})
+                                    {
+                                        default_pixels = actual;
+                                    }
+                                    if (parameters == std::array<int, 2>{100, 100})
+                                    {
+                                        saw_contrast_adaptation |= actual != default_pixels;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    presentation.reset();
+                    SDL_DestroyTexture(input);
+                }
+            }
+        }
+    }
+    require(saw_sharpening && saw_contrast_adaptation, "CAS controls did not change detailed input");
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
+}
+
+static std::array<int, 3> crt_reference(const std::vector<std::array<int, 3>>& input, const std::vector<int>& parameters,
+                                              SDL_Point input_size, SDL_Point output_size, int x, int y)
+{
+    const double u = (x + .5) / output_size.x, v = (y + .5) / output_size.y;
+    const double ox = parameters[10] / 100.0, oy = parameters[11] / 100.0;
+    if (!ox || !oy)
+    {
+        return {};
+    }
+    const double mapped_u = (u - .5) / ox + .5, mapped_v = (v - .5) / oy + .5;
+    if (mapped_u < 0 || mapped_u > 1 || mapped_v < 0 || mapped_v > 1)
+    {
+        return {};
+    }
+    const double corner = parameters[6] / 1000.0;
+    const double cx = corner - std::min(std::min(u, 1 - u), corner);
+    const double cy = corner - std::min(std::min(v, 1 - v) * output_size.y / output_size.x, corner);
+    const double border = std::clamp((corner - std::hypot(cx, cy)) * parameters[7], 0.0, 1.0);
+    const double ratio_x = mapped_u * input_size.x - .5;
+    const double ratio_y = mapped_v * input_size.y - .5;
+    const double fraction_x = ratio_x - std::floor(ratio_x);
+    const double fraction = ratio_y - std::floor(ratio_y);
+    const int row = static_cast<int>(std::floor(ratio_y));
+    const int column = static_cast<int>(std::floor(ratio_x));
+    const double pi = 3.141592653589;
+    std::array<double, 4> coefficients{pi * (1 + fraction_x), pi * fraction_x,
+                                       pi * (1 - fraction_x), pi * (2 - fraction_x)};
+    double sum = 0;
+    for (auto& coefficient : coefficients)
+    {
+        coefficient = std::max(std::abs(coefficient), .0001);
+        coefficient = 2 * std::sin(coefficient) * std::sin(coefficient / 2) / (coefficient * coefficient);
+        sum += coefficient;
+    }
+    for (auto& coefficient : coefficients)
+    {
+        coefficient /= sum;
+    }
+    const double filter = double(input_size.y) / output_size.y / 3;
+    const double weight = parameters[14] / 100.0, luminance = parameters[15] / 100.0;
+    std::array<double, 3> result{};
+    for (int channel = 0; channel < 3; ++channel)
+    {
+        const auto sample = [&](double x, int y)
+        {
+            const int left = static_cast<int>(std::floor(x));
+            const int a = input[std::clamp(y, 0, input_size.y - 1) * input_size.x +
+                                std::clamp(left, 0, input_size.x - 1)][channel];
+            const int b = input[std::clamp(y, 0, input_size.y - 1) * input_size.x +
+                                std::clamp(left + 1, 0, input_size.x - 1)][channel];
+            return std::pow((a + (b - a) * (x - std::floor(x))) / 255.0, parameters[0] / 10.0);
+        };
+        double current_color = 0, next_color = 0;
+        for (int tap = 0; tap < 4; ++tap)
+        {
+            const double x = column + double(tap - 1) / parameters[13];
+            current_color += sample(x, row) * coefficients[tap];
+            next_color += sample(x, row + 1) * coefficients[tap];
+        }
+        current_color = std::clamp(current_color, 0.0, 1.0);
+        next_color = std::clamp(next_color, 0.0, 1.0);
+        const auto beam = [&](double distance, double color)
+        {
+            const double width = 2 + 2 * std::pow(color, 4);
+            return (luminance + 1.4) * std::exp(-std::pow(distance / weight / std::sqrt(.5 * width), width)) /
+                   (.6 + .2 * width);
+        };
+        const double current = (beam(fraction, current_color) + beam(fraction + filter, current_color) +
+                                beam(std::abs(fraction - filter), current_color)) / 3;
+        const double next = (beam(1 - fraction, next_color) + beam(std::abs(1 - fraction - filter), next_color) +
+                             beam(std::abs(1 - fraction + filter), next_color)) / 3;
+        const bool dimmed = (x % 2 == 0) ? channel == 1 : channel != 1;
+        const double mask = dimmed ? 1 - parameters[12] / 100.0 : 1;
+        double value = (current_color * current + next_color * next) * border * mask;
+        if (parameters[1])
+        {
+            value = std::clamp(value, 0.0, 1.0);
+            const double power = 1 / ((-.7 * (1 - weight) + 1) * (1 - .5 * parameters[12] / 100.0)) - 1.25;
+            const double circle = std::sqrt(std::max(0.0, 1 - (value - 1) * (value - 1)));
+            value = std::sqrt(value) + (circle - std::sqrt(value)) * power;
+        }
+        else
+        {
+            value = std::pow(std::max(0.0, value), 10.0 / parameters[2]);
+        }
+        result[channel] = value;
+    }
+    const bool dark = std::sqrt(result[0] * result[0] + result[1] * result[1] + result[2] * result[2]) * .5775 < .5;
+    const double gray = dark ? result[0] * .18 + result[1] * .72 + result[2] * .02
+                             : result[0] * .3 + result[1] * .6 + result[2] * .1;
+    std::array<int, 3> output{};
+    for (int channel = 0; channel < 3; ++channel)
+    {
+        output[channel] = static_cast<int>(std::round(std::clamp(gray + (result[channel] - gray) * parameters[17] / 100.0,
+                                                                0.0, 1.0) * 255));
+    }
+    return output;
+}
+
+static void crt_pixels(const char* driver)
+{
+    auto* window = SDL_CreateWindow("CRT-Geom pixels", 128, 512, 0);
+    require(window, SDL_GetError());
+    auto* renderer = SDL_CreateRenderer(window, driver);
+    require(renderer, SDL_GetError());
+    {
+        GamePresentation presentation;
+        shaders::Stack settings;
+        settings.effects = {shaders::Shader(shaders::Effect::CrtGeom)};
+        settings.effects[0].enabled = true;
+        GamePresentation::Image frame;
+        frame.shaders = &settings;
+        frame.scaling = 2;
+        auto capture = [&](const SDL_FRect& crop, SDL_Point output_size)
+        {
+            require(SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255), SDL_GetError());
+            require(SDL_RenderClear(renderer), SDL_GetError());
+            presentation.draw(renderer, frame, {0, 0, float(output_size.x), float(output_size.y)}, &crop);
+            const bool output_effect = std::any_of(settings.effects.begin(), settings.effects.end(),
+                [](const shaders::Shader& shader)
+                { return shader.enabled && shaders::definition(shader.effect).output_resolution; });
+            require(!output_effect || presentation.intermediate_size().x == 0,
+                    "CRT output was enlarged again after rendering");
+            auto* surface = SDL_RenderReadPixels(renderer, nullptr);
+            require(surface, SDL_GetError());
+            std::vector<std::array<int, 3>> result(output_size.x * output_size.y);
+            for (int y = 0; y < output_size.y; ++y)
+            {
+                for (int x = 0; x < output_size.x; ++x)
+                {
+                    Uint8 r, g, b, a;
+                    require(SDL_ReadSurfacePixel(surface, x, y, &r, &g, &b, &a), SDL_GetError());
+                    result[y * output_size.x + x] = {r, g, b};
+                }
+            }
+            SDL_DestroySurface(surface);
+            require(SDL_RenderPresent(renderer), SDL_GetError());
+            return result;
+        };
+        const SDL_FRect crop{3, 8, 8, 6};
+        const SDL_Point output_size{64, 48};
+        frame.width = 20;
+        frame.height = 24;
+        for (auto format : {SDL_PIXELFORMAT_RGBA32, SDL_PIXELFORMAT_RGB565})
+        {
+            for (bool flipped : {false, true})
+            {
+                frame.flipped = flipped;
+                auto* input = SDL_CreateTexture(renderer, format, SDL_TEXTUREACCESS_STREAMING, 28, 32);
+                require(input, SDL_GetError());
+                SDL_SetTextureBlendMode(input, SDL_BLENDMODE_NONE);
+                frame.texture = input;
+                for (int value : {0, 128, 255, -1})
+                {
+                    std::vector<Uint8> pixels(28 * 32 * 4);
+                    for (int i = 0; i < 28 * 32; ++i)
+                    {
+                        pixels[i * 4] = pixels[i * 4 + 2] = pixels[i * 4 + 3] = 255;
+                    }
+                    for (int y = 8; y < 14; ++y)
+                    {
+                        const int storage_y = flipped ? 23 - y : y;
+                        for (int x = 3; x < 11; ++x)
+                        {
+                            for (int channel = 0; channel < 3; ++channel)
+                            {
+                                pixels[(storage_y * 28 + x) * 4 + channel] = value < 0
+                                    ? 32 + (((x - 3) * 3 + (y - 8) * 5 + channel * 2) % 7) * 32 : value;
+                            }
+                        }
+                    }
+                    const int pitch = 28 * SDL_BYTESPERPIXEL(format);
+                    std::vector<Uint8> upload(pitch * 32);
+                    require(SDL_ConvertPixels(28, 32, SDL_PIXELFORMAT_RGBA32, pixels.data(), 28 * 4,
+                                               format, upload.data(), pitch), SDL_GetError());
+                    require(SDL_ConvertPixels(28, 32, format, upload.data(), pitch,
+                                               SDL_PIXELFORMAT_RGBA32, pixels.data(), 28 * 4), SDL_GetError());
+                    require(SDL_UpdateTexture(input, nullptr, upload.data(), pitch), SDL_GetError());
+                    std::vector<std::array<int, 3>> image(8 * 6);
+                    for (int y = 0; y < 6; ++y)
+                    {
+                        const int storage_y = flipped ? 15 - y : 8 + y;
+                        for (int x = 0; x < 8; ++x)
+                        {
+                            for (int channel = 0; channel < 3; ++channel)
+                            {
+                                image[y * 8 + x][channel] = pixels[(storage_y * 28 + 3 + x) * 4 + channel];
+                            }
+                        }
+                    }
+                    for (int preset = 0; preset < 7; ++preset)
+                    {
+                        settings.effects = {shaders::Shader(shaders::Effect::CrtGeom)};
+                        settings.effects[0].enabled = true;
+                        auto& parameters = settings.effects[0].parameters;
+                        parameters[4] = 0;
+                        parameters[6] = 1;
+                        if (preset == 1)
+                        {
+                            parameters[12] = 0;
+                        }
+                        if (preset == 2)
+                        {
+                            parameters[17] = 0;
+                        }
+                        if (preset == 3)
+                        {
+                            parameters[1] = 1;
+                        }
+                        if (preset == 4)
+                        {
+                            parameters[14] = 45;
+                            parameters[15] = 20;
+                        }
+                        if (preset == 5)
+                        {
+                            parameters[0] = 18;
+                            parameters[2] = 24;
+                            parameters[10] = -100;
+                            parameters[12] = 70;
+                        }
+                        if (preset == 6)
+                        {
+                            parameters[10] = 110;
+                            parameters[11] = 95;
+                            parameters[13] = 3;
+                        }
+                        const auto actual = capture(crop, output_size);
+                        for (int y = 0; y < output_size.y; ++y)
+                        {
+                            for (int x = 0; x < output_size.x; ++x)
+                            {
+                                const auto expected = crt_reference(image, parameters, {8, 6}, output_size, x, y);
+                                for (int channel = 0; channel < 3; ++channel)
+                                {
+                                    if (std::abs(actual[y * output_size.x + x][channel] - expected[channel]) > 3)
+                                    {
+                                        std::cerr << driver << " CRT preset " << preset << " input " << value
+                                                  << " flipped " << flipped << " pixel " << x << ',' << y
+                                                  << " channel " << channel << " got " << actual[y * output_size.x + x][channel]
+                                                  << " expected " << expected[channel] << '\n';
+                                        throw std::runtime_error("CRT scanline/mask/gamma output differs from the reference");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (format == SDL_PIXELFORMAT_RGBA32 && !flipped && value == 128)
+                    {
+                        settings.effects = {shaders::Shader(shaders::Effect::CrtGeom)};
+                        settings.effects[0].enabled = true;
+                        auto& parameters = settings.effects[0].parameters;
+                        parameters[12] = 0;
+                        const auto curved = capture(crop, output_size);
+                        require(curved[0][0] == 0 && curved[24 * 64 + 32][0] > 0,
+                                "CRT curvature must keep a visible center and black corners");
+                        for (int y = 0; y < 48; ++y)
+                        {
+                            for (int x = 0; x < 64; ++x)
+                            {
+                                require(std::abs(curved[y * 64 + x][0] - curved[y * 64 + 63 - x][0]) <= 3 &&
+                                            std::abs(curved[y * 64 + x][0] - curved[(47 - y) * 64 + x][0]) <= 3,
+                                        "Zero-tilt CRT geometry must be centered and symmetric");
+                            }
+                        }
+                        const auto resized = capture(crop, {63, 47});
+                        require(resized[23 * 63 + 31][0] > 0 && resized[0][0] == 0,
+                                "CRT resize or exact center projection failed");
+                        parameters[8] = 25;
+                        require(capture(crop, output_size) != curved, "CRT tilt had no effect");
+                        parameters[8] = 0;
+                        parameters[4] = 0;
+                        parameters[10] = 0;
+                        const auto blank = capture(crop, output_size);
+                        require(std::all_of(blank.begin(), blank.end(), [](const auto& pixel)
+                                             { return pixel == std::array<int, 3>{0, 0, 0}; }),
+                                "Zero overscan must blank the screen without invalid arithmetic");
+                        parameters[10] = 100;
+                        parameters[6] = 1;
+                        parameters[12] = 30;
+                        const auto crt_only = capture(crop, output_size);
+                        settings.effects.emplace_back(shaders::Effect::Cas);
+                        settings.effects[1].enabled = true;
+                        settings.effects[1].parameters = {100, 100};
+                        const auto with_cas = capture(crop, output_size);
+                        for (int y = 0; y < 48; ++y)
+                        {
+                            for (int x = 0; x < 64; ++x)
+                            {
+                                const auto expected = cas_reference(crt_only, 64, 48, x, y, 100, 100);
+                                for (int channel = 0; channel < 3; ++channel)
+                                {
+                                    require(std::abs(with_cas[y * 64 + x][channel] - expected[channel]) <= 3,
+                                            "An effect after CRT did not preserve display resolution");
+                                }
+                            }
+                        }
+                        std::swap(settings.effects[0], settings.effects[1]);
+                        const auto cas_first = capture(crop, output_size);
+                        for (std::size_t pixel = 0; pixel < crt_only.size(); ++pixel)
+                        {
+                            require(std::abs(cas_first[pixel][0] - crt_only[pixel][0]) <= 3,
+                                    "An effect before CRT changed flat input unexpectedly");
+                        }
+                        settings.effects[1].enabled = false;
+                        const auto source_only = capture(crop, output_size);
+                        require(presentation.intermediate_size().x == 64 &&
+                                    std::all_of(source_only.begin(), source_only.end(), [](const auto& pixel)
+                                                { return std::abs(pixel[0] - 128) <= 1; }),
+                                "Disabling CRT did not restore source-resolution scaling");
+                    }
+                }
+                presentation.reset();
+                SDL_DestroyTexture(input);
+            }
+        }
+        // Alternate fields must depend on source height, not the composite or output height.
+        auto* fields = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING, 12, 408);
+        require(fields, SDL_GetError());
+        SDL_SetTextureBlendMode(fields, SDL_BLENDMODE_NONE);
+        std::vector<Uint8> pixels(12 * 408 * 4, 255);
+        for (int y = 0; y < 400; ++y)
+        {
+            for (int x = 2; x < 6; ++x)
+            {
+                for (int channel = 0; channel < 3; ++channel)
+                {
+                    pixels[((y + 3) * 12 + x) * 4 + channel] = y % 2 ? 0 : 255;
+                }
+            }
+        }
+        require(SDL_UpdateTexture(fields, nullptr, pixels.data(), 12 * 4), SDL_GetError());
+        settings.effects = {shaders::Shader(shaders::Effect::CrtGeom)};
+        settings.effects[0].enabled = true;
+        settings.effects[0].parameters[4] = 0;
+        settings.effects[0].parameters[6] = 1;
+        settings.effects[0].parameters[12] = 0;
+        frame.texture = fields;
+        frame.width = 8;
+        frame.height = 406;
+        frame.flipped = false;
+        const auto first = capture({2, 3, 4, 400}, {64, 480});
+        const auto second = capture({2, 3, 4, 400}, {64, 480});
+        require(first[240 * 64 + 32][0] > 32 && second[240 * 64 + 32][0] == 0,
+                "CRT interlacing did not alternate even and odd source fields");
+        settings.effects[0].parameters[16] = 0;
+        const auto progressive = capture({2, 3, 4, 400}, {64, 480});
+        require(capture({2, 3, 4, 400}, {64, 480}) == progressive, "Disabling CRT interlacing did not stop field alternation");
+        presentation.reset();
+        SDL_DestroyTexture(fields);
+    }
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
+}
+
 int main(int argc, char** argv)
 {
     try
@@ -717,11 +1331,15 @@ int main(int argc, char** argv)
         require(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD), SDL_GetError());
         controls();
         film_controls();
+        cas_controls();
+        crt_controls();
         if (argc > 1)
         {
             pixels(argv[1]);
             film_pixels(argv[1]);
             viewport_pixels(argv[1]);
+            cas_pixels(argv[1]);
+            crt_pixels(argv[1]);
         }
         SDL_Quit();
         std::cout << "Shader controls, persistence, bypass and pixels passed\n";

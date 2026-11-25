@@ -38,7 +38,7 @@ bool ShaderChain::allocated() const
 }
 
 SDL_Texture* ShaderChain::draw(SDL_Renderer* renderer, SDL_Texture* input, unsigned width, unsigned height,
-                               const shaders::Stack& settings, const SDL_FRect* crop, bool flipped)
+                               const shaders::Stack& settings, const SDL_FRect* crop, bool flipped, SDL_Point output_size)
 {
     if (!settings.active())
     {
@@ -124,6 +124,11 @@ SDL_Texture* ShaderChain::draw(SDL_Renderer* renderer, SDL_Texture* input, unsig
         {
             state.passes[pass] = vulkan ? create_vulkan_shader_pass(renderer, shader.effect)
                                       : create_gl_shader_pass(renderer, shader.effect);
+        }
+        if (shaders::definition(shader.effect).output_resolution && output_size.x > 0 && output_size.y > 0)
+        {
+            width = static_cast<unsigned>(output_size.x);
+            height = static_cast<unsigned>(output_size.y);
         }
         input = state.passes[pass++]->draw(input, width, height, shader, frame_count, source, flipped);
         source = {0, 0, float(width), float(height)};

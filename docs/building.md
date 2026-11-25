@@ -27,7 +27,7 @@ The helper also accepts `--toolchain cmake/toolchains/linux-aarch64.cmake` and a
 
 ## Running and installation
 
-The build produces `cabinet` (Home) and `cabinet-runner` (independent sessions). Both embed Atkinson Hyperlegible Next fonts and icon assets. The font's [SIL Open Font License](../assets/fonts/OFL.txt) and SDL license are installed with either build.
+The build produces `cabinet` (Home) and `cabinet-runner` (independent sessions). Both embed Atkinson Hyperlegible Next fonts and icon assets. The font's [SIL Open Font License](../assets/fonts/OFL.txt), SDL license, and shader license notices are installed with either build.
 
 ```sh
 python3 tools/build_cores.py --arch x86_64 --jobs 4

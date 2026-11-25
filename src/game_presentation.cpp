@@ -92,8 +92,10 @@ void GamePresentation::draw(SDL_Renderer* renderer, const Image& frame, const SD
     source = dual_screen::texture_source(source, frame.height, frame.flipped);
     if (frame.shaders && frame.shaders->active())
     {
+        const SDL_Point output_size{static_cast<int>(std::lround(destination.w)),
+                                    static_cast<int>(std::lround(destination.h))};
         texture = shader_chain.draw(renderer, texture, frame.width, frame.height, *frame.shaders, &source,
-                                    frame.flipped);
+                                    frame.flipped, output_size);
         source.x = source.y = 0;
         check(SDL_GetTextureSize(texture, &source.w, &source.h));
         flip = SDL_FLIP_NONE;

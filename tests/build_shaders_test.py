@@ -38,7 +38,7 @@ class ShaderMetadataTest(unittest.TestCase):
         self.assertIn("edited_color(texture2D(", gl_fragment)
 
     def test_parameter_counts_pack_into_matching_backend_layouts(self):
-        for count in (1, 4, 7, 8, 9, 24):
+        for count in (1, 4, 7, 8, 9, 20):
             with self.subTest(count=count):
                 metadata = copy.deepcopy(self.metadata)
                 metadata["parameters"] = [dict(metadata["parameters"][0], symbol=f"parameter_{i}") for i in range(count)]
@@ -58,13 +58,14 @@ class ShaderMetadataTest(unittest.TestCase):
             {"minimum": 101}, {"maximum": -100}, {"maximum": 2**31},
             {"scale": 0}, {"scale": float("nan")}, {"scale": float("inf")},
             {"symbol": "not an identifier"}, {"suffix": 1},
+            {"display_scale": 0}, {"display_scale": float("nan")}, {"decimals": -1}, {"decimals": 4},
         ):
             with self.subTest(changes=changes):
                 metadata = copy.deepcopy(self.metadata)
                 metadata["parameters"][0].update(changes)
                 with self.assertRaises(ValueError):
                     build.parse_shader(source(metadata, self.body))
-        for count in (0, 25):
+        for count in (0, 21):
             metadata = copy.deepcopy(self.metadata)
             metadata["parameters"] = [dict(metadata["parameters"][0], symbol=f"parameter_{i}") for i in range(count)]
             with self.assertRaises(ValueError):
@@ -80,7 +81,7 @@ class ShaderMetadataTest(unittest.TestCase):
         metadata = [entry for entry, _ in catalog]
         self.assertEqual(build.definition(metadata), (generated_dir / "shader_definitions.h").read_text())
         self.assertEqual(build.programs(metadata), (generated_dir / "shader_programs.h").read_text())
-        self.assertEqual([entry["id"] for entry in metadata], ["chromatic_aberration", "color_correction", "film_noise", "vignette"])
+        self.assertEqual([entry["id"] for entry in metadata], ["cas", "chromatic_aberration", "color_correction", "crt_geom", "film_noise", "vignette"])
 
     def test_generated_gl_matches_shaders(self):
         for metadata, body in build.load_catalog(ROOT):
@@ -97,7 +98,24 @@ class ShaderMetadataTest(unittest.TestCase):
         self.assertIn("uv, context.x,", gl_fragment)
         self.assertIn("p.context.yz + clamp(position, p.source.zw, vec2(1.0) - p.source.zw) * p.source.xy", fragment)
         self.assertIn("sample_frame(vec2 position)", gl_fragment)
+        self.assertIn("return 2.0 * p.source.zw;", fragment)
+        self.assertIn("return 2.0 * source.zw;", gl_fragment)
         self.assertIn('"Grain strength"', build.definition([entry for entry, _ in build.load_catalog(ROOT)]))
+
+    def test_output_resolution_and_display_units(self):
+        catalog = [metadata for metadata, _ in build.load_catalog(ROOT)]
+        crt = next(entry for entry in catalog if entry["id"] == "crt_geom")
+        self.assertEqual(len(crt["parameters"]), 18)
+        self.assertEqual(crt["resolution"], "output")
+        self.assertIn("crt_geom_parameters, true", build.definition(catalog))
+        metadata, body = build.parse_shader((ROOT / "assets/shaders/effects/crt_geom.glsl").read_text())
+        _, fragment, _, gl_fragment = build.sources(metadata, body)
+        self.assertIn("return p.target.xy;", fragment)
+        self.assertIn("return p.target.zw;", fragment)
+        self.assertIn("return target.xy;", gl_fragment)
+        self.metadata["resolution"] = "invalid"
+        with self.assertRaises(ValueError):
+            build.parse_shader(source(self.metadata, self.body))
 
     def test_discovery_ignores_internal_shaders_and_checks_ids(self):
         with tempfile.TemporaryDirectory(prefix="cabinet-shader-catalog-") as directory:
