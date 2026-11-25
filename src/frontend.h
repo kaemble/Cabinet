@@ -204,6 +204,7 @@ private:
     std::span<const shaders::Parameter> shader_parameters() const;
     void discard_shader_move();
     void toggle_shader();
+    void sort_shaders();
     void move_shader();
     std::array<bool, SDL_SCANCODE_COUNT> hotkey_keys{};
     std::array<bool, 2> hotkey_pressed{};

@@ -267,6 +267,10 @@ bool Frontend::mouse_event(const SDL_Event& e)
                 {
                     move_shader();
                 }
+                else if (target == -7)
+                {
+                    sort_shaders();
+                }
                 else
                 {
                     activate();
@@ -414,9 +418,9 @@ void Frontend::event(const SDL_Event& e)
         }
         return;
     }
-    if (page == Page::Shaders && e.key.scancode == SDL_SCANCODE_DELETE)
+    if (page == Page::Shaders && e.key.scancode == SDL_SCANCODE_S)
     {
-        toggle_shader();
+        sort_shaders();
         return;
     }
     if (page == Page::Shaders && e.key.scancode == SDL_SCANCODE_M)
@@ -554,7 +558,7 @@ void Frontend::update(bool focused, std::uint64_t now)
     {
         if (clear && !previous_clear)
         {
-            toggle_shader();
+            sort_shaders();
         }
         if (move && !previous_move)
         {
@@ -896,9 +900,15 @@ std::vector<std::string> Frontend::rows() const
     case Page::Shaders:
     {
         std::vector<std::string> result;
-        for (const auto& shader : shaders.effects)
+        for (std::size_t i = 0; i < shaders.effects.size(); ++i)
         {
-            result.push_back(std::string(shaders::name(shader.effect)) + (shader.enabled ? ": on" : ": off"));
+            const auto& shader = shaders.effects[i];
+            std::string row = std::string(shaders::name(shader.effect)) + (shader.enabled ? ": on" : ": off");
+            if (shader_move && i == static_cast<std::size_t>(selected))
+            {
+                row = "<" + row + ">";
+            }
+            result.push_back(row);
         }
         result.push_back("Back");
         return result;
@@ -985,6 +995,13 @@ void Frontend::toggle_shader()
         return;
     }
     selected = shaders.toggle(selected);
+}
+void Frontend::sort_shaders()
+{
+    if (page == Page::Shaders && !shader_move)
+    {
+        selected = shaders.sort(selected);
+    }
 }
 void Frontend::move_shader()
 {
@@ -1144,6 +1161,11 @@ int Frontend::controls_row() const
 }
 void Frontend::adjust(int direction)
 {
+    if (page == Page::Shaders)
+    {
+        toggle_shader();
+        return;
+    }
     if (page == Page::ShaderParameters && selected >= 0 && selected < static_cast<int>(shader_parameters().size()))
     {
         auto& value = shaders.effects.at(shader_selection).parameters[selected];
@@ -1920,10 +1942,11 @@ void Frontend::draw(SDL_Renderer* renderer, TextRenderer& font, int width, int h
         }
         else if (page == Page::Shaders)
         {
-            description = shader_move ? "Move within the enabled or disabled group"
+            description = shader_move ? "Move up or down; confirm to keep the order"
                           : selected < static_cast<int>(shaders.effects.size())
-                              ? (shaders.effects[selected].enabled ? "Configure this effect's parameters"
-                                                                  : "Enable this effect to configure its parameters")
+                              ? (shaders.effects[selected].enabled ? "Left / Right toggles this effect; "
+                                                                    "select configures parameters"
+                                                                  : "Left / Right enables this effect")
                           : "Return to Video";
         }
         else if (page == Page::ShaderParameters)
@@ -1984,11 +2007,15 @@ void Frontend::draw(SDL_Renderer* renderer, TextRenderer& font, int width, int h
         {
             prompts.push_back({pad ? "controller_buttons_north" : "keyboard_delete", "Unbind", -4});
         }
+        if (page == Page::Shaders && !shader_move)
+        {
+            prompts.push_back({pad ? "controller_buttons_north" : "", pad ? "Sort" : "S: Sort", -7});
+        }
         if (shader_row)
         {
             if (!shader_move)
             {
-                prompts.push_back({pad ? "controller_buttons_north" : "keyboard_delete", "Toggle", -5});
+                prompts.push_back({pad ? "controller_dpad_horizontal" : "keyboard_arrows_horizontal", "Toggle", -5});
                 prompts.push_back({pad ? "controller_buttons_west" : "", pad ? "Move" : "M: Move", -6});
             }
             else

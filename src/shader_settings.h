@@ -73,19 +73,31 @@ struct Stack
     }
     int toggle(int index)
     {
-        auto shader = effects.at(index);
+        auto& shader = effects.at(index);
         shader.enabled = !shader.enabled;
-        effects.erase(effects.begin() + index);
-        const auto inactive =
-            std::find_if(effects.begin(), effects.end(), [](const Shader& entry) { return !entry.enabled; });
-        const int position = static_cast<int>(inactive - effects.begin());
-        effects.insert(inactive, shader);
+        return index;
+    }
+    int sort(int index)
+    {
+        int position = index;
+        if (index >= 0 && index < static_cast<int>(effects.size()))
+        {
+            const bool enabled = effects[index].enabled;
+            position = static_cast<int>(std::count_if(effects.begin(), effects.begin() + index,
+                [&](const Shader& shader) { return shader.enabled == enabled; }));
+            if (!enabled)
+            {
+                position += static_cast<int>(std::count_if(effects.begin(), effects.end(),
+                    [](const Shader& shader) { return shader.enabled; }));
+            }
+        }
+        std::stable_partition(effects.begin(), effects.end(), [](const Shader& shader) { return shader.enabled; });
         return position;
     }
     int move(int index, int direction)
     {
         const int next = index + direction;
-        if (next >= 0 && next < static_cast<int>(effects.size()) && effects[index].enabled == effects[next].enabled)
+        if (next >= 0 && next < static_cast<int>(effects.size()))
         {
             std::swap(effects[index], effects[next]);
             return next;
@@ -142,7 +154,6 @@ struct Stack
             effects.erase(found);
         }
         effects.push_back(shader);
-        std::stable_partition(effects.begin(), effects.end(), [](const Shader& entry) { return entry.enabled; });
     }
 };
 } // namespace shaders

@@ -55,11 +55,11 @@ static void controls()
     require(ui.page == Page::Shaders && ui.video_preview(), "Shaders must live under Video and preview the game");
     key(ui, SDL_SCANCODE_RETURN);
     require(ui.page == Page::Shaders, "Inactive shader parameters must not be accessible");
-    key(ui, SDL_SCANCODE_RIGHT);
-    require(ui.shaders.effects[0].parameters[0] == 0 && !ui.shaders.active(),
-            "Inactive shader parameters must not change");
     key(ui, SDL_SCANCODE_DELETE);
-    require(ui.shaders.active(), "Shader toggle failed");
+    require(!ui.shaders.active(), "Delete must no longer toggle shaders");
+    key(ui, SDL_SCANCODE_RIGHT);
+    require(ui.shaders.active() && ui.selected == 0 && ui.shaders.effects[0].parameters[0] == 0,
+            "Right must toggle the effect in place without changing its parameters");
     key(ui, SDL_SCANCODE_RETURN);
     require(ui.page == Page::ShaderParameters && ui.video_preview(), "Active shader parameters must be accessible");
     key(ui, SDL_SCANCODE_RIGHT);
@@ -80,7 +80,7 @@ static void controls()
     key(ui, SDL_SCANCODE_M);
     key(ui, SDL_SCANCODE_DOWN);
     require(ui.shaders.effects[0].parameters[0] == 20, "Move did not reorder effects");
-    key(ui, SDL_SCANCODE_DELETE);
+    key(ui, SDL_SCANCODE_RIGHT);
     require(ui.shaders.effects[1].enabled, "Toggle changed an effect while moving");
     key(ui, SDL_SCANCODE_ESCAPE);
     require(ui.shaders == original && ui.selected == 0 && ui.page == Page::Shaders,
@@ -89,12 +89,13 @@ static void controls()
     key(ui, SDL_SCANCODE_DOWN);
     key(ui, SDL_SCANCODE_RETURN);
     require(ui.selected == 1 && ui.shaders.effects[0].parameters[0] == 20, "Confirm did not accept the reorder");
-    key(ui, SDL_SCANCODE_DELETE);
+    key(ui, SDL_SCANCODE_RIGHT);
     require(ui.selected == 1 && !ui.shaders.effects[1].enabled && ui.shaders.effects[0].enabled,
-            "Active effects must sort first");
+            "Toggling an effect must keep its position");
     key(ui, SDL_SCANCODE_M);
     key(ui, SDL_SCANCODE_UP);
-    require(ui.selected == 1, "Move crossed the enabled/disabled boundary");
+    require(ui.selected == 0 && !ui.shaders.effects[0].enabled,
+            "Moving must be allowed across enabled and disabled effects");
     key(ui, SDL_SCANCODE_M);
     key(ui, SDL_SCANCODE_ESCAPE);
     require(ui.page == Page::Video && ui.selected == 3, "Shaders Back did not return to Video");
@@ -130,11 +131,11 @@ static void controls()
     snapshot.values.shaders.effects[0].parameters = {15, 120, 80, 150, 110, 95, 105};
     snapshot.values.shaders.effects[1].enabled = true;
     snapshot.values.shaders.effects[1].parameters = {7, 0, 1};
-    snapshot.values.shaders.effects[2].enabled = true;
+    snapshot.values.shaders.effects[2].enabled = false;
     snapshot.values.shaders.effects[2].parameters = {10, -10, 20, -20, 30, -30};
     snapshot.values.shaders.effects[3].enabled = true;
     snapshot.values.shaders.effects[3].parameters = {65};
-    snapshot.values.shaders.effects[4].enabled = true;
+    snapshot.values.shaders.effects[4].enabled = false;
     snapshot.values.shaders.effects[4].parameters = {35, 75};
     snapshot.values.shaders.effects[5].enabled = true;
     snapshot.values.shaders.effects[5].parameters[4] = 0;
@@ -183,7 +184,19 @@ static void controls()
         press(SDL_GAMEPAD_BUTTON_SOUTH);
         require(pad.page == Page::Shaders, "Controller opened inactive shader parameters");
         press(SDL_GAMEPAD_BUTTON_NORTH);
-        require(pad.shaders.active(), "North did not toggle the shader");
+        require(!pad.shaders.active(), "North must sort rather than toggle effects");
+        press(SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+        require(pad.shaders.active(), "D-pad Right did not toggle the shader");
+        pad.selected = 2;
+        press(SDL_GAMEPAD_BUTTON_DPAD_LEFT);
+        require(pad.selected == 2 && pad.shaders.effects[2].enabled && !pad.shaders.effects[1].enabled,
+                "D-pad Left must toggle without sorting");
+        press(SDL_GAMEPAD_BUTTON_NORTH);
+        require(pad.selected == 1 && pad.shaders.effects[1].effect == shaders::Effect::ChromaticAberration &&
+                    pad.shaders.effects[1].enabled && !pad.shaders.effects[2].enabled,
+                "North must sort active effects first and retain the highlighted effect");
+        press(SDL_GAMEPAD_BUTTON_DPAD_LEFT);
+        pad.selected = 0;
         auto next = pad.shaders.effects[0];
         next.parameters[0] = 25;
         pad.shaders.effects.insert(pad.shaders.effects.begin() + 1, next);
@@ -204,6 +217,60 @@ static void controls()
     SDL_CloseJoystick(joystick);
     require(SDL_DetachVirtualJoystick(id), SDL_GetError());
 }
+static void sort_controls()
+{
+    Frontend ui;
+    ui.page = Page::Shaders;
+    ui.shaders = test_stack();
+    ui.shaders.effects[1].enabled = true;
+    ui.shaders.effects[4].enabled = true;
+    const auto original = ui.shaders;
+    key(ui, SDL_SCANCODE_LEFT);
+    key(ui, SDL_SCANCODE_RIGHT);
+    require(ui.shaders == original && ui.selected == 0, "Both arrows must toggle without sorting");
+    key(ui, SDL_SCANCODE_S);
+    auto expected = original;
+    expected.effects = {original.effects[1], original.effects[4], original.effects[0], original.effects[2],
+                        original.effects[3], original.effects[5]};
+    require(ui.shaders == expected && ui.selected == 2,
+            "Sort must preserve both groups' order and the selected inactive effect");
+    key(ui, SDL_SCANCODE_S);
+    require(ui.shaders == expected && ui.selected == 2, "Repeated sorting changed an already sorted stack");
+    key(ui, SDL_SCANCODE_M);
+    key(ui, SDL_SCANCODE_UP);
+    const auto moving = ui.shaders;
+    key(ui, SDL_SCANCODE_S);
+    key(ui, SDL_SCANCODE_LEFT);
+    require(ui.shaders == moving && ui.selected == 1, "Sorting and toggling must be ignored during a move");
+    key(ui, SDL_SCANCODE_ESCAPE);
+    require(ui.shaders == expected && ui.selected == 2, "Cancel did not restore a move across active effects");
+    ui.selected = 0;
+    key(ui, SDL_SCANCODE_M);
+    key(ui, SDL_SCANCODE_UP);
+    require(ui.selected == 0 && ui.shaders == expected, "Moving above the first effect must stop at the boundary");
+    key(ui, SDL_SCANCODE_M);
+    ui.selected = static_cast<int>(ui.shaders.effects.size()) - 1;
+    key(ui, SDL_SCANCODE_M);
+    key(ui, SDL_SCANCODE_DOWN);
+    require(ui.selected == static_cast<int>(ui.shaders.effects.size()) - 1 && ui.shaders == expected,
+            "Moving below the last effect must stop before Back");
+    key(ui, SDL_SCANCODE_M);
+    ui.shaders = original;
+    ui.selected = static_cast<int>(ui.shaders.effects.size());
+    key(ui, SDL_SCANCODE_S);
+    key(ui, SDL_SCANCODE_RIGHT);
+    require(ui.shaders == expected && ui.selected == static_cast<int>(ui.shaders.effects.size()),
+            "Sorting must retain Back selection, and arrows on Back must leave effects unchanged");
+
+    auto duplicates = original;
+    auto second = duplicates.effects[0];
+    second.parameters[0] = 20;
+    duplicates.effects.push_back(second);
+    const int selected = duplicates.sort(static_cast<int>(duplicates.effects.size()) - 1);
+    require(selected == 6 && duplicates.effects[selected].parameters[0] == 20,
+            "Sort must track the selected instance when effect types repeat");
+}
+
 static void film_controls()
 {
     Frontend ui;
@@ -213,30 +280,30 @@ static void film_controls()
     const auto defaults = ui.shaders.effects[1].parameters;
     ui.page = Page::Shaders;
     ui.selected = 1;
-    key(ui, SDL_SCANCODE_DELETE);
-    require(ui.selected == 0 && ui.shaders.effects[0].effect == shaders::Effect::FilmNoise,
-            "Enabling film grain did not move it into the active group");
+    key(ui, SDL_SCANCODE_RIGHT);
+    require(ui.selected == 1 && ui.shaders.effects[1].enabled,
+            "Enabling film grain must keep its position");
     key(ui, SDL_SCANCODE_RETURN);
     ui.selected = 0;
     key(ui, SDL_SCANCODE_RIGHT);
-    require(ui.shaders.effects[0].parameters[0] == defaults[0] + 1, "Film grain did not use its own parameter step");
+    require(ui.shaders.effects[1].parameters[0] == defaults[0] + 1, "Film grain did not use its own parameter step");
     key(ui, SDL_SCANCODE_RETURN);
     key(ui, SDL_SCANCODE_DOWN);
     key(ui, SDL_SCANCODE_RETURN);
-    require(ui.shaders.effects[0].parameters[0] == defaults[0] + 2, "Film grain value selection failed");
+    require(ui.shaders.effects[1].parameters[0] == defaults[0] + 2, "Film grain value selection failed");
     ui.selected = 1;
     key(ui, SDL_SCANCODE_RIGHT);
-    require(ui.shaders.effects[0].parameters[1] == 1, "Hotspot toggle failed");
+    require(ui.shaders.effects[1].parameters[1] == 1, "Hotspot toggle failed");
     ui.selected = 3;
     key(ui, SDL_SCANCODE_RETURN);
-    require(ui.shaders.effects[0].parameters == defaults, "Restore defaults used the wrong effect");
+    require(ui.shaders.effects[1].parameters == defaults, "Restore defaults used the wrong effect");
     key(ui, SDL_SCANCODE_ESCAPE);
-    ui.selected = 1;
-    key(ui, SDL_SCANCODE_DELETE);
+    ui.selected = 0;
+    key(ui, SDL_SCANCODE_RIGHT);
     key(ui, SDL_SCANCODE_M);
-    key(ui, SDL_SCANCODE_UP);
+    key(ui, SDL_SCANCODE_DOWN);
     key(ui, SDL_SCANCODE_RETURN);
-    require(ui.shaders.effects[0].effect == shaders::Effect::ColorCorrection && ui.shaders.effects[1].enabled,
+    require(ui.shaders.effects[1].effect == shaders::Effect::ColorCorrection && ui.shaders.effects[0].enabled,
             "Mixed effect reorder failed");
 
     shaders::Stack settings;
@@ -256,17 +323,18 @@ static void film_controls()
     chromatic.selected = effect_index(chromatic.shaders, shaders::Effect::ChromaticAberration);
     require(chromatic.shaders.effects[chromatic.selected].effect == shaders::Effect::ChromaticAberration,
             "Chromatic aberration is missing from the catalog");
+    const int chromatic_index = chromatic.selected;
     const auto chromatic_defaults = chromatic.shaders.effects[chromatic.selected].parameters;
-    key(chromatic, SDL_SCANCODE_DELETE);
+    key(chromatic, SDL_SCANCODE_RIGHT);
     key(chromatic, SDL_SCANCODE_RETURN);
     chromatic.selected = 4;
     key(chromatic, SDL_SCANCODE_RIGHT);
-    require(chromatic.shaders.effects[0].parameters.size() == 6 &&
-                chromatic.shaders.effects[0].parameters[4] == chromatic_defaults[4] + 1,
+    require(chromatic.shaders.effects[chromatic_index].parameters.size() == 6 &&
+                chromatic.shaders.effects[chromatic_index].parameters[4] == chromatic_defaults[4] + 1,
             "Chromatic aberration did not expose independent RGB offsets");
     chromatic.selected = 6;
     key(chromatic, SDL_SCANCODE_RETURN);
-    require(chromatic.shaders.effects[0].parameters == chromatic_defaults &&
+    require(chromatic.shaders.effects[chromatic_index].parameters == chromatic_defaults &&
                 !chromatic.shaders.effects[effect_index(chromatic.shaders, shaders::Effect::FilmNoise)].enabled,
             "Chromatic defaults affected film grain");
 
@@ -275,14 +343,15 @@ static void film_controls()
     vignette.selected = effect_index(vignette.shaders, shaders::Effect::Vignette);
     require(vignette.shaders.effects[vignette.selected].effect == shaders::Effect::Vignette && !vignette.shaders.active(),
             "Vignette must be a separate disabled effect");
-    key(vignette, SDL_SCANCODE_DELETE);
+    const int vignette_index = vignette.selected;
+    key(vignette, SDL_SCANCODE_RIGHT);
     key(vignette, SDL_SCANCODE_RETURN);
     key(vignette, SDL_SCANCODE_LEFT);
-    require(vignette.shaders.effects[0].parameters == std::vector<int>({95}),
+    require(vignette.shaders.effects[vignette_index].parameters == std::vector<int>({95}),
             "Vignette strength adjustment failed");
     vignette.selected = 1;
     key(vignette, SDL_SCANCODE_RETURN);
-    require(vignette.shaders.effects[0].parameters == std::vector<int>({100}) &&
+    require(vignette.shaders.effects[vignette_index].parameters == std::vector<int>({100}) &&
                 !vignette.shaders.effects[effect_index(vignette.shaders, shaders::Effect::FilmNoise)].enabled,
             "Vignette defaults affected film grain");
 }
@@ -292,20 +361,21 @@ static void cas_controls()
     Frontend ui;
     ui.page = Page::Shaders;
     ui.selected = effect_index(ui.shaders, shaders::Effect::Cas);
+    const int index = ui.selected;
     require(!ui.shaders.active() && ui.shaders.effects[ui.selected].parameters == std::vector<int>({0, 100}),
             "CAS defaults differ from the reference");
     key(ui, SDL_SCANCODE_RETURN);
     require(ui.page == Page::Shaders, "Inactive CAS controls were accessible");
-    key(ui, SDL_SCANCODE_DELETE);
+    key(ui, SDL_SCANCODE_RIGHT);
     key(ui, SDL_SCANCODE_RETURN);
     key(ui, SDL_SCANCODE_RIGHT);
-    require(ui.shaders.effects[0].parameters[0] == 5, "CAS contrast adjustment failed");
+    require(ui.shaders.effects[index].parameters[0] == 5, "CAS contrast adjustment failed");
     ui.selected = 1;
     key(ui, SDL_SCANCODE_LEFT);
-    require(ui.shaders.effects[0].parameters[1] == 95, "CAS intensity adjustment failed");
+    require(ui.shaders.effects[index].parameters[1] == 95, "CAS intensity adjustment failed");
     ui.selected = 2;
     key(ui, SDL_SCANCODE_RETURN);
-    require(ui.shaders.effects[0].parameters == std::vector<int>({0, 100}), "CAS restore defaults failed");
+    require(ui.shaders.effects[index].parameters == std::vector<int>({0, 100}), "CAS restore defaults failed");
 }
 
 static void crt_controls()
@@ -313,6 +383,7 @@ static void crt_controls()
     Frontend ui;
     ui.page = Page::Shaders;
     ui.selected = effect_index(ui.shaders, shaders::Effect::CrtGeom);
+    const int index = ui.selected;
     const auto defaults = ui.shaders.effects[ui.selected].parameters;
     const auto& definition = shaders::definition(shaders::Effect::CrtGeom);
     require(defaults.size() == 18 && definition.output_resolution && !ui.shaders.active(),
@@ -321,16 +392,16 @@ static void crt_controls()
                 shaders::parameter_value(definition.parameters[6], 30) == "0.030" &&
                 shaders::parameter_value(definition.parameters[8], -5) == "-0.05 rad",
             "CRT floating-point controls were not formatted in their actual units");
-    key(ui, SDL_SCANCODE_DELETE);
+    key(ui, SDL_SCANCODE_RIGHT);
     key(ui, SDL_SCANCODE_RETURN);
     key(ui, SDL_SCANCODE_RIGHT);
-    require(ui.shaders.effects[0].parameters[0] == 25, "CRT gamma adjustment failed");
+    require(ui.shaders.effects[index].parameters[0] == 25, "CRT gamma adjustment failed");
     ui.selected = 8;
     key(ui, SDL_SCANCODE_LEFT);
-    require(ui.shaders.effects[0].parameters[8] == -5, "CRT tilt adjustment failed");
+    require(ui.shaders.effects[index].parameters[8] == -5, "CRT tilt adjustment failed");
     ui.selected = 18;
     key(ui, SDL_SCANCODE_RETURN);
-    require(ui.shaders.effects[0].parameters == defaults, "CRT restore defaults failed");
+    require(ui.shaders.effects[index].parameters == defaults, "CRT restore defaults failed");
 }
 
 static std::array<int, 3> corrected(std::array<int, 3> input, const shaders::Shader& shader)
@@ -1330,6 +1401,7 @@ int main(int argc, char** argv)
         isolate_virtual_gamepads();
         require(SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD), SDL_GetError());
         controls();
+        sort_controls();
         film_controls();
         cas_controls();
         crt_controls();
