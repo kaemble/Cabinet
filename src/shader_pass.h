@@ -4,6 +4,7 @@
 #include <SDL3/SDL.h>
 #include <array>
 #include <memory>
+#include <span>
 
 // Source scale and half-texel bounds, followed by animation, native texture offset, and output/input dimensions.
 inline std::array<float, 12> shader_source_values(SDL_Texture* input, const SDL_FRect& source, bool flipped,
@@ -16,6 +17,12 @@ inline std::array<float, 12> shader_source_values(SDL_Texture* input, const SDL_
             float(output_width), float(output_height), source.w, source.h};
 }
 
+struct ShaderInput
+{
+    SDL_Texture* texture;
+    bool linear;
+};
+
 class ShaderPass
 {
   public:
@@ -25,8 +32,9 @@ class ShaderPass
     const shaders::Effect effect;
     virtual ~ShaderPass() = default;
     virtual SDL_Texture* draw(SDL_Texture* input, unsigned width, unsigned height, const shaders::Shader& settings,
-                              unsigned frame_count, const SDL_FRect& source, bool flipped) = 0;
+                              unsigned frame_count, const SDL_FRect& source, bool flipped,
+                              std::span<const ShaderInput> auxiliary = {}) = 0;
 };
 
-std::unique_ptr<ShaderPass> create_gl_shader_pass(SDL_Renderer* renderer, shaders::Effect effect);
-std::unique_ptr<ShaderPass> create_vulkan_shader_pass(SDL_Renderer* renderer, shaders::Effect effect);
+std::unique_ptr<ShaderPass> create_gl_shader_pass(SDL_Renderer* renderer, shaders::Effect effect, std::size_t stage);
+std::unique_ptr<ShaderPass> create_vulkan_shader_pass(SDL_Renderer* renderer, shaders::Effect effect, std::size_t stage);

@@ -3,12 +3,14 @@
 
 from pathlib import Path
 import argparse
+import base64
 import json
 import math
 import re
 import struct
 import subprocess
 import tempfile
+import zlib
 
 
 def parse_shader(source):
@@ -28,6 +30,28 @@ def parse_shader(source):
         raise ValueError("Shader context must be a boolean")
     if metadata.get("resolution", "source") not in ("source", "output"):
         raise ValueError("Shader resolution must be source or output")
+    passes = metadata.get("passes", [metadata["entry"]])
+    if not isinstance(passes, list) or not 1 <= len(passes) <= 4 or any(
+            not isinstance(entry, str) or not re.fullmatch(r"[a-z][a-z0-9_]*", entry) for entry in passes):
+        raise ValueError("Shader passes must contain one to four entry names")
+    if "passes" in metadata and (not metadata.get("context") or passes[-1] != metadata["entry"]):
+        raise ValueError("Multipass shaders require context and must end at the shader entry")
+    textures = metadata.get("textures", [])
+    names = set()
+    if not isinstance(textures, list) or len(textures) > 3:
+        raise ValueError("Shaders may embed up to three lookup textures")
+    for texture in textures:
+        name = texture["name"]
+        if not re.fullmatch(r"[a-z][a-z0-9_]*", name) or name in names or name == "frame" or name.startswith("pass_"):
+            raise ValueError("Invalid or duplicate lookup texture name")
+        names.add(name)
+        if any(type(texture[key]) is not int or not 1 <= texture[key] <= 2048 for key in ("width", "height")):
+            raise ValueError("Invalid lookup texture dimensions")
+        if type(texture["channels"]) is not int or not 1 <= texture["channels"] <= 4:
+            raise ValueError("Invalid lookup texture channels")
+        if type(texture["linear"]) is not bool:
+            raise ValueError("Lookup texture filtering must be a boolean")
+        texture_data(texture)
     parameters = metadata["parameters"]
     # Reserve three vec4s for source extent, animation and output dimensions within Vulkan's guaranteed 128-byte push constants.
     if not 1 <= len(parameters) <= 20:
@@ -63,6 +87,21 @@ def parse_shader(source):
         if type(scale) not in (int, float) or not math.isfinite(scale) or scale <= 0:
             raise ValueError("Parameter scale must be finite and positive")
     return metadata, body
+
+
+def texture_data(texture):
+    data = zlib.decompress(base64.b64decode("".join(texture["data"]), validate=True))
+    if len(data) != texture["width"] * texture["height"] * texture["channels"]:
+        raise ValueError("Lookup texture data does not match its dimensions")
+    return data
+
+
+def pass_entries(metadata):
+    return metadata.get("passes", [metadata["entry"]])
+
+
+def input_names(metadata, stage):
+    return [f"pass_{i}" for i in range(stage)] + [texture["name"] for texture in metadata.get("textures", [])]
 
 
 def effect_name(metadata):
@@ -124,7 +163,7 @@ inline const Definition& definition(Effect effect)
     return result
 
 
-def sources(metadata, body):
+def sources(metadata, body, stage=0):
     count = (len(metadata["parameters"]) + 3) // 4
     vertex = """#version 450
 layout(location=0) out vec2 uv;
@@ -156,8 +195,16 @@ uniform sampler2D frame;
         texture = "texture" if vulkan else "texture2D"
         output = "color" if vulkan else "gl_FragColor"
         helper = ""
+        for binding, name in enumerate(input_names(metadata, stage), 1):
+            declaration = f"layout(binding={binding}) " if vulkan else ""
+            helper += f"{declaration}uniform sampler2D {name};\n"
+            helper += f"vec4 sample_{name}(vec2 position)\n{{\n    return {texture}({name}, clamp(position, vec2(0.0), vec2(1.0)));\n}}\n"
+        if "passes" in metadata:
+            helper += f"#define CABINET_PASS {stage}\n"
+            for i, parameter in enumerate(metadata["parameters"]):
+                helper += f"float {parameter['symbol']}()\n{{\n    return {prefix}values[{i // 4}].{'xyzw'[i % 4]};\n}}\n"
         if metadata.get("context", False):
-            helper = f"vec2 frame_texel_size()\n{{\n    return 2.0 * {prefix}source.zw;\n}}\n"
+            helper += f"vec2 frame_texel_size()\n{{\n    return 2.0 * {prefix}source.zw;\n}}\n"
             helper += f"vec2 frame_size()\n{{\n    return {prefix}target.zw;\n}}\n"
             helper += f"vec2 output_size()\n{{\n    return {prefix}target.xy;\n}}\n"
             helper += "vec3 sample_frame(vec2 position)\n{\n"
@@ -167,7 +214,9 @@ uniform sampler2D frame;
             arguments += ["uv", f"{prefix}context.x"]
         arguments += [f"{prefix}values[{i // 4}].{'xyzw'[i % 4]}" for i in range(len(metadata["parameters"]))]
         main = "\nvoid main()\n{\n"
-        main += f"    {output} = vec4({metadata['entry']}({', '.join(arguments)}), 1.0);\n}}\n"
+        call = f"{pass_entries(metadata)[stage]}({', '.join(arguments)})"
+        result = call if "passes" in metadata else f"vec4({call}, 1.0)"
+        main += f"    {output} = {result};\n}}\n"
         if vulkan:
             fragment += helper + body + main
         else:
@@ -197,18 +246,48 @@ def programs(catalog):
         result += f'#include "{metadata["id"]}_shaders.h"\n'
     result += """namespace shaders
 {
-struct Program
+struct Stage
 {
     std::span<const std::uint32_t> vertex;
     std::span<const std::uint32_t> fragment;
     const char* gl_vertex;
     const char* gl_fragment;
+    std::span<const char* const> inputs;
+};
+struct Texture
+{
+    unsigned width, height;
+    bool linear;
+    std::span<const std::uint8_t> pixels;
+};
+struct Program
+{
+    std::span<const Stage> stages;
+    std::span<const Texture> textures;
 };
 """
+    maximum_samplers = max(len(pass_entries(metadata)) + len(metadata.get("textures", [])) for metadata in catalog)
+    result += f"inline constexpr std::size_t maximum_sampler_count = {maximum_samplers};\n"
+    for metadata in catalog:
+        shader_id = metadata["id"]
+        for stage in range(len(pass_entries(metadata))):
+            names = input_names(metadata, stage)
+            result += f"inline constexpr std::array<const char*, {len(names)}> {shader_id}_{stage}_inputs{{{{"
+            result += ", ".join(json.dumps(name) for name in names) + "}};\n"
+        result += f"inline constexpr std::array<Stage, {len(pass_entries(metadata))}> {shader_id}_stages{{{{\n"
+        for stage in range(len(pass_entries(metadata))):
+            symbol = f"{shader_id}_{stage}"
+            result += f"    {{{symbol}_vert, {symbol}_frag, {symbol}_gl_vertex, {symbol}_gl_fragment, {shader_id}_{stage}_inputs}},\n"
+        result += "}};\n"
+        textures = metadata.get("textures", [])
+        result += f"inline constexpr std::array<Texture, {len(textures)}> {shader_id}_textures{{{{\n"
+        for texture in textures:
+            result += f"    {{{texture['width']}, {texture['height']}, {str(texture['linear']).lower()}, {shader_id}_{texture['name']}_pixels}},\n"
+        result += "}};\n"
     result += f"inline constexpr std::array<Program, {len(catalog)}> programs{{{{\n"
     for metadata in catalog:
         shader_id = metadata["id"]
-        result += f"    {{{shader_id}_vert, {shader_id}_frag, {shader_id}_gl_vertex, {shader_id}_gl_fragment}},\n"
+        result += f"    {{{shader_id}_stages, {shader_id}_textures}},\n"
     return result + """}};
 inline const Program& program(Effect effect)
 {
@@ -237,13 +316,26 @@ def effect_headers(root, compiler):
     with tempfile.TemporaryDirectory(prefix="cabinet-shaders-") as directory:
         for metadata, body in catalog:
             shader_id = metadata["id"]
-            vertex, fragment, gl_vertex, gl_fragment = sources(metadata, body)
             result = "#pragma once\n#include <cstdint>\n"
             result += f"// Generated by tools/build_shaders.py from assets/shaders/effects/{shader_id}.glsl.\n"
-            for stage, code in [("vert", vertex), ("frag", fragment)]:
-                result += spirv_array(compiler, Path(directory), f"{shader_id}_{stage}", stage, code)
-            for name, code in [("vertex", gl_vertex), ("fragment", gl_fragment)]:
-                result += f'inline constexpr const char* {shader_id}_gl_{name} = R"shader({code})shader";\n'
+            for stage in range(len(pass_entries(metadata))):
+                vertex, fragment, gl_vertex, gl_fragment = sources(metadata, body, stage)
+                symbol = f"{shader_id}_{stage}"
+                for extension, code in [("vert", vertex), ("frag", fragment)]:
+                    result += spirv_array(compiler, Path(directory), f"{symbol}_{extension}", extension, code)
+                for name, code in [("vertex", gl_vertex), ("fragment", gl_fragment)]:
+                    result += f'inline constexpr const char* {symbol}_gl_{name} = R"shader({code})shader";\n'
+            for texture in metadata.get("textures", []):
+                data = texture_data(texture)
+                channels = texture["channels"]
+                pixels = bytearray()
+                for i in range(0, len(data), channels):
+                    pixel = data[i:i + channels]
+                    pixels.extend((pixel + bytes(3))[:3] + (pixel[3:4] if channels == 4 else bytes([255])))
+                result += f"inline constexpr std::uint8_t {shader_id}_{texture['name']}_pixels[] = {{\n"
+                for i in range(0, len(pixels), 32):
+                    result += "    " + ",".join(str(value) for value in pixels[i:i + 32]) + ",\n"
+                result += "};\n"
             outputs[f"{shader_id}_shaders.h"] = result
     metadata = [entry for entry, _ in catalog]
     outputs["shader_definitions.h"] = definition(metadata)

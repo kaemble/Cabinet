@@ -18,6 +18,7 @@ void check(VkResult result)
 
 struct VulkanPass : ShaderPass
 {
+    std::size_t stage;
     SDL_Renderer* renderer;
     VkDevice device = VK_NULL_HANDLE;
     VkPhysicalDevice gpu = VK_NULL_HANDLE;
@@ -29,7 +30,7 @@ struct VulkanPass : ShaderPass
     VkPipelineLayout layout = VK_NULL_HANDLE;
     VkRenderPass render_pass = VK_NULL_HANDLE;
     VkPipeline pipeline = VK_NULL_HANDLE;
-    VkSampler sampler = VK_NULL_HANDLE;
+    VkSampler sampler = VK_NULL_HANDLE, linear_sampler = VK_NULL_HANDLE;
     VkImage output = VK_NULL_HANDLE;
     VkDeviceMemory memory = VK_NULL_HANDLE;
     VkImageView output_view = VK_NULL_HANDLE;
@@ -41,12 +42,13 @@ struct VulkanPass : ShaderPass
         VkCommandBuffer command = VK_NULL_HANDLE;
         VkDescriptorSet descriptor = VK_NULL_HANDLE;
         VkFence fence = VK_NULL_HANDLE;
-        VkImageView source_view = VK_NULL_HANDLE;
+        std::vector<VkImageView> source_views;
     };
     std::array<Slot, 3> slots{};
     std::size_t slot_index = 0;
 
-    VulkanPass(SDL_Renderer* renderer, shaders::Effect effect) : ShaderPass(effect), renderer(renderer)
+    VulkanPass(SDL_Renderer* renderer, shaders::Effect effect, std::size_t stage)
+        : ShaderPass(effect), stage(stage), renderer(renderer)
     {
         const auto props = SDL_GetRendererProperties(renderer);
         device = static_cast<VkDevice>(SDL_GetPointerProperty(props, SDL_PROP_RENDERER_VULKAN_DEVICE_POINTER, nullptr));
@@ -93,9 +95,9 @@ struct VulkanPass : ShaderPass
         destroy_target();
         for (auto& slot : slots)
         {
-            if (slot.source_view)
+            for (auto view : slot.source_views)
             {
-                vkDestroyImageView(device, slot.source_view, nullptr);
+                vkDestroyImageView(device, view, nullptr);
             }
             if (slot.fence)
             {
@@ -118,6 +120,10 @@ struct VulkanPass : ShaderPass
         {
             vkDestroySampler(device, sampler, nullptr);
         }
+        if (linear_sampler)
+        {
+            vkDestroySampler(device, linear_sampler, nullptr);
+        }
         if (descriptors)
         {
             vkDestroyDescriptorPool(device, descriptors, nullptr);
@@ -137,12 +143,16 @@ struct VulkanPass : ShaderPass
         {
             return;
         }
-        VkDescriptorSetLayoutBinding binding{0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
-                                             VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
+        const auto input_count = static_cast<std::uint32_t>(shaders::program(effect).stages[stage].inputs.size() + 1);
+        std::vector<VkDescriptorSetLayoutBinding> binding(input_count);
+        for (std::uint32_t i = 0; i < input_count; ++i)
+        {
+            binding[i] = {i, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, nullptr};
+        }
         VkDescriptorSetLayoutCreateInfo set_info{};
         set_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        set_info.bindingCount = 1;
-        set_info.pBindings = &binding;
+        set_info.bindingCount = input_count;
+        set_info.pBindings = binding.data();
         check(vkCreateDescriptorSetLayout(device, &set_info, nullptr, &bindings));
         const auto constant_size =
             static_cast<std::uint32_t>((shaders::parameter_vector_count(effect) + 3) * 4 * sizeof(float));
@@ -192,7 +202,7 @@ struct VulkanPass : ShaderPass
             check(vkCreateShaderModule(device, &info, nullptr, &result));
             return result;
         };
-        const auto& code = shaders::program(effect);
+        const auto& code = shaders::program(effect).stages[stage];
         const auto vertex = module(code.vertex);
         VkShaderModule fragment = VK_NULL_HANDLE;
         try
@@ -268,12 +278,15 @@ struct VulkanPass : ShaderPass
         sampler_info.addressModeU = sampler_info.addressModeV = sampler_info.addressModeW =
             VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
         check(vkCreateSampler(device, &sampler_info, nullptr, &sampler));
+        sampler_info.magFilter = sampler_info.minFilter = VK_FILTER_LINEAR;
+        check(vkCreateSampler(device, &sampler_info, nullptr, &linear_sampler));
         VkCommandPoolCreateInfo pool{};
         pool.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
         pool.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
         pool.queueFamilyIndex = family;
         check(vkCreateCommandPool(device, &pool, nullptr, &commands));
-        VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, static_cast<std::uint32_t>(slots.size())};
+        VkDescriptorPoolSize size{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                                  static_cast<std::uint32_t>(slots.size()) * input_count};
         VkDescriptorPoolCreateInfo descriptor_info{};
         descriptor_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
         descriptor_info.maxSets = slots.size();
@@ -375,7 +388,8 @@ struct VulkanPass : ShaderPass
         SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_NONE);
     }
     SDL_Texture* draw(SDL_Texture* input, unsigned frame_width, unsigned frame_height,
-                      const shaders::Shader& settings, unsigned frame_count, const SDL_FRect& crop, bool flipped) override
+                      const shaders::Shader& settings, unsigned frame_count, const SDL_FRect& crop, bool flipped,
+                      std::span<const ShaderInput> auxiliary) override
     {
         if (!SDL_FlushRenderer(renderer))
         {
@@ -385,44 +399,57 @@ struct VulkanPass : ShaderPass
         create_target(frame_width, frame_height);
         auto& slot = slots[slot_index++ % slots.size()];
         check(vkWaitForFences(device, 1, &slot.fence, VK_TRUE, UINT64_MAX));
-        if (slot.source_view)
+        for (auto view : slot.source_views)
         {
-            vkDestroyImageView(device, slot.source_view, nullptr);
+            vkDestroyImageView(device, view, nullptr);
         }
-        slot.source_view = VK_NULL_HANDLE;
-        const auto props = SDL_GetTextureProperties(input);
-        const auto format = SDL_GetNumberProperty(props, SDL_PROP_TEXTURE_FORMAT_NUMBER, 0);
-        VkImageViewCreateInfo view{};
-        view.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        view.image = reinterpret_cast<VkImage>(SDL_GetNumberProperty(props, SDL_PROP_TEXTURE_VULKAN_TEXTURE_NUMBER, 0));
-        view.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        view.format = (format == SDL_PIXELFORMAT_BGRA32 || format == SDL_PIXELFORMAT_BGRX32) ? VK_FORMAT_B8G8R8A8_UNORM
-                                                                                             : VK_FORMAT_R8G8B8A8_UNORM;
-        view.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        check(vkCreateImageView(device, &view, nullptr, &slot.source_view));
-        VkDescriptorImageInfo source{sampler, slot.source_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-        VkWriteDescriptorSet write{};
-        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        write.dstSet = slot.descriptor;
-        write.descriptorCount = 1;
-        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        write.pImageInfo = &source;
-        vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+        slot.source_views.clear();
+        const auto input_count = static_cast<std::uint32_t>(auxiliary.size() + 1);
+        std::array<VkDescriptorImageInfo, shaders::maximum_sampler_count> sources{};
+        std::array<VkWriteDescriptorSet, shaders::maximum_sampler_count> writes{};
+        std::array<VkImageMemoryBarrier, shaders::maximum_sampler_count> barriers{};
+        for (std::size_t i = 0; i < input_count; ++i)
+        {
+            auto* sampled = i == 0 ? input : auxiliary[i - 1].texture;
+            const auto props = SDL_GetTextureProperties(sampled);
+            const auto format = SDL_GetNumberProperty(props, SDL_PROP_TEXTURE_FORMAT_NUMBER, 0);
+            VkImageViewCreateInfo view{};
+            view.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+            view.image = reinterpret_cast<VkImage>(SDL_GetNumberProperty(props, SDL_PROP_TEXTURE_VULKAN_TEXTURE_NUMBER, 0));
+            view.viewType = VK_IMAGE_VIEW_TYPE_2D;
+            view.format = (format == SDL_PIXELFORMAT_BGRA32 || format == SDL_PIXELFORMAT_BGRX32)
+                              ? VK_FORMAT_B8G8R8A8_UNORM
+                              : VK_FORMAT_R8G8B8A8_UNORM;
+            view.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+            VkImageView source_view = VK_NULL_HANDLE;
+            check(vkCreateImageView(device, &view, nullptr, &source_view));
+            slot.source_views.push_back(source_view);
+            sources[i] = {(i > 0 && auxiliary[i - 1].linear) ? linear_sampler : sampler,
+                          source_view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+            auto& write = writes[i];
+            write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            write.dstSet = slot.descriptor;
+            write.dstBinding = static_cast<std::uint32_t>(i);
+            write.descriptorCount = 1;
+            write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            write.pImageInfo = &sources[i];
+            auto& barrier = barriers[i];
+            barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
+            barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+            barrier.oldLayout = barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barrier.image = view.image;
+            barrier.subresourceRange = view.subresourceRange;
+        }
+        vkUpdateDescriptorSets(device, input_count, writes.data(), 0, nullptr);
         check(vkResetCommandBuffer(slot.command, 0));
         VkCommandBufferBeginInfo begin{};
         begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         check(vkBeginCommandBuffer(slot.command, &begin));
-        VkImageMemoryBarrier barrier{};
-        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
-        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        barrier.oldLayout = barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        barrier.srcQueueFamilyIndex = barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.image = view.image;
-        barrier.subresourceRange = view.subresourceRange;
         vkCmdPipelineBarrier(slot.command, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0,
-                             0, nullptr, 0, nullptr, 1, &barrier);
+                             0, nullptr, 0, nullptr, input_count, barriers.data());
         VkRenderPassBeginInfo pass{};
         pass.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         pass.renderPass = render_pass;
@@ -458,7 +485,7 @@ struct VulkanPass : ShaderPass
 };
 } // namespace
 
-std::unique_ptr<ShaderPass> create_vulkan_shader_pass(SDL_Renderer* renderer, shaders::Effect effect)
+std::unique_ptr<ShaderPass> create_vulkan_shader_pass(SDL_Renderer* renderer, shaders::Effect effect, std::size_t stage)
 {
-    return std::make_unique<VulkanPass>(renderer, effect);
+    return std::make_unique<VulkanPass>(renderer, effect, stage);
 }

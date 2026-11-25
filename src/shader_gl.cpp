@@ -54,9 +54,12 @@ struct GlPass : ShaderPass
     FUNCTION(decltype(&glBindTexture), bind_texture);
     FUNCTION(decltype(&glTexImage2D), texture_image);
     FUNCTION(decltype(&glTexParameteri), texture_parameter);
+    FUNCTION(decltype(&glGetTexParameteriv), get_texture_parameter);
     FUNCTION(decltype(&glDeleteTextures), delete_textures);
     FUNCTION(decltype(&glDrawArrays), draw_arrays);
 #undef FUNCTION
+    std::size_t stage;
+    std::vector<GLint> input_uniforms;
     SDL_Renderer* renderer;
     SDL_Window* window;
     SDL_GLContext context;
@@ -78,9 +81,9 @@ struct GlPass : ShaderPass
             throw std::runtime_error(std::string("Missing shader function: ") + name);
         }
     }
-    GlPass(SDL_Renderer* renderer, shaders::Effect effect)
-        : ShaderPass(effect), renderer(renderer), window(SDL_GL_GetCurrentWindow()), context(SDL_GL_GetCurrentContext()),
-          es(std::string_view(SDL_GetRendererName(renderer)) == "opengles2")
+    GlPass(SDL_Renderer* renderer, shaders::Effect effect, std::size_t stage)
+        : ShaderPass(effect), stage(stage), renderer(renderer), window(SDL_GL_GetCurrentWindow()),
+          context(SDL_GL_GetCurrentContext()), es(std::string_view(SDL_GetRendererName(renderer)) == "opengles2")
     {
 #define LOAD(member, function) load(member, "gl" #function)
         LOAD(create_shader, CreateShader);
@@ -121,6 +124,7 @@ struct GlPass : ShaderPass
         LOAD(bind_texture, BindTexture);
         LOAD(texture_image, TexImage2D);
         LOAD(texture_parameter, TexParameteri);
+        LOAD(get_texture_parameter, GetTexParameteriv);
         LOAD(delete_textures, DeleteTextures);
         LOAD(draw_arrays, DrawArrays);
 #undef LOAD
@@ -187,7 +191,7 @@ struct GlPass : ShaderPass
         {
             return;
         }
-        const auto& code = shaders::program(effect);
+        const auto& code = shaders::program(effect).stages[stage];
         const auto vertex = compile(GL_VERTEX_SHADER, code.gl_vertex);
         GLuint fragment = 0;
         try
@@ -221,6 +225,10 @@ struct GlPass : ShaderPass
         source_uniform = uniform_location(program, "source");
         context_uniform = uniform_location(program, "context");
         target_uniform = uniform_location(program, "target");
+        for (const auto* name : code.inputs)
+        {
+            input_uniforms.push_back(uniform_location(program, name));
+        }
         GLint previous_buffer;
         get_integer(GL_ARRAY_BUFFER_BINDING, &previous_buffer);
         constexpr std::array<float, 6> vertices{-1, -1, 3, -1, -1, 3};
@@ -229,22 +237,34 @@ struct GlPass : ShaderPass
         bind_buffer(GL_ARRAY_BUFFER, previous_buffer);
     }
     SDL_Texture* draw(SDL_Texture* input, unsigned frame_width, unsigned frame_height,
-                      const shaders::Shader& settings, unsigned frame_count, const SDL_FRect& crop, bool flipped) override
+                      const shaders::Shader& settings, unsigned frame_count, const SDL_FRect& crop, bool flipped,
+                      std::span<const ShaderInput> auxiliary) override
     {
         if (!SDL_FlushRenderer(renderer))
         {
             throw std::runtime_error(SDL_GetError());
         }
         initialize();
-        GLint old_program, old_buffer, old_framebuffer, old_active, old_texture;
+        GLint old_program, old_buffer, old_framebuffer, old_active;
         std::array<GLint, 4> old_viewport{};
         std::array<GLboolean, 4> mask{};
         get_integer(GL_CURRENT_PROGRAM, &old_program);
         get_integer(GL_ARRAY_BUFFER_BINDING, &old_buffer);
         get_integer(GL_FRAMEBUFFER_BINDING, &old_framebuffer);
         get_integer(GL_ACTIVE_TEXTURE, &old_active);
+        struct TextureState
+        {
+            GLint binding = 0, minimum = GL_NEAREST, maximum = GL_NEAREST;
+            GLuint native = 0;
+        };
+        std::array<TextureState, shaders::maximum_sampler_count> textures{};
+        const auto texture_count = auxiliary.size() + 1;
+        for (std::size_t i = 0; i < texture_count; ++i)
+        {
+            active_texture(GL_TEXTURE0 + i);
+            get_integer(GL_TEXTURE_BINDING_2D, &textures[i].binding);
+        }
         active_texture(GL_TEXTURE0);
-        get_integer(GL_TEXTURE_BINDING_2D, &old_texture);
         get_integer(GL_VIEWPORT, old_viewport.data());
         get_boolean(GL_COLOR_WRITEMASK, mask.data());
         constexpr std::array<GLenum, 5> capabilities{GL_BLEND, GL_SCISSOR_TEST, GL_DEPTH_TEST, GL_STENCIL_TEST,
@@ -276,7 +296,18 @@ struct GlPass : ShaderPass
             }
             bind_buffer(GL_ARRAY_BUFFER, old_buffer);
             use_program(old_program);
-            bind_texture(GL_TEXTURE_2D, old_texture);
+            for (std::size_t i = texture_count; i-- > 0;)
+            {
+                active_texture(GL_TEXTURE0 + i);
+                const auto& saved = textures[i];
+                if (saved.native)
+                {
+                    bind_texture(GL_TEXTURE_2D, saved.native);
+                    texture_parameter(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, saved.minimum);
+                    texture_parameter(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, saved.maximum);
+                }
+                bind_texture(GL_TEXTURE_2D, saved.binding);
+            }
             active_texture(old_active);
             bind_framebuffer(GL_FRAMEBUFFER, old_framebuffer);
             viewport(old_viewport[0], old_viewport[1], old_viewport[2], old_viewport[3]);
@@ -333,15 +364,30 @@ struct GlPass : ShaderPass
             }
             viewport(0, 0, width, height);
             color_mask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-            const auto input_props = SDL_GetTextureProperties(input);
-            const auto native = SDL_GetNumberProperty(
-                input_props, es ? SDL_PROP_TEXTURE_OPENGLES2_TEXTURE_NUMBER : SDL_PROP_TEXTURE_OPENGL_TEXTURE_NUMBER,
-                0);
-            bind_texture(GL_TEXTURE_2D, static_cast<GLuint>(native));
+            for (std::size_t i = 0; i < texture_count; ++i)
+            {
+                auto* sampled = i == 0 ? input : auxiliary[i - 1].texture;
+                const auto props = SDL_GetTextureProperties(sampled);
+                const auto native = SDL_GetNumberProperty(
+                    props, es ? SDL_PROP_TEXTURE_OPENGLES2_TEXTURE_NUMBER : SDL_PROP_TEXTURE_OPENGL_TEXTURE_NUMBER, 0);
+                active_texture(GL_TEXTURE0 + i);
+                auto& saved = textures[i];
+                saved.native = static_cast<GLuint>(native);
+                bind_texture(GL_TEXTURE_2D, saved.native);
+                get_texture_parameter(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, &saved.minimum);
+                get_texture_parameter(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, &saved.maximum);
+                const auto filter = (i > 0 && auxiliary[i - 1].linear) ? GL_LINEAR : GL_NEAREST;
+                texture_parameter(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
+                texture_parameter(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
+            }
             use_program(program);
             const auto values = shaders::uniform_values(settings);
             const auto source = shader_source_values(input, crop, flipped, frame_count, width, height);
             uniform_1i(frame_uniform, 0);
+            for (std::size_t i = 0; i < input_uniforms.size(); ++i)
+            {
+                uniform_1i(input_uniforms[i], static_cast<GLint>(i + 1));
+            }
             uniform_4fv(values_uniform, static_cast<GLsizei>(shaders::parameter_vector_count(effect)), values.data());
             uniform_4fv(source_uniform, 1, source.data());
             uniform_4fv(context_uniform, 1, source.data() + 4);
@@ -362,11 +408,11 @@ struct GlPass : ShaderPass
 };
 } // namespace
 
-std::unique_ptr<ShaderPass> create_gl_shader_pass(SDL_Renderer* renderer, shaders::Effect effect)
+std::unique_ptr<ShaderPass> create_gl_shader_pass(SDL_Renderer* renderer, shaders::Effect effect, std::size_t stage)
 {
     if (!SDL_FlushRenderer(renderer))
     {
         throw std::runtime_error(SDL_GetError());
     }
-    return std::make_unique<GlPass>(renderer, effect);
+    return std::make_unique<GlPass>(renderer, effect, stage);
 }

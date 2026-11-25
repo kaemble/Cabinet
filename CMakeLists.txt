@@ -41,7 +41,7 @@ target_include_directories(cabinet_text PUBLIC src)
 target_link_libraries(cabinet_text PUBLIC SDL3::SDL3-static Freetype::Freetype)
 install(FILES assets/fonts/OFL.txt DESTINATION ${CMAKE_INSTALL_DATADIR}/cabinet/fonts)
 install(FILES third_party/SDL-LICENSE.txt third_party/film-noise-LICENSE.txt third_party/CAS-LICENSE.txt
-  third_party/CRT-Geom-LICENSE.txt
+  third_party/CRT-Geom-LICENSE.txt third_party/SMAA-LICENSE.txt
   DESTINATION ${CMAKE_INSTALL_DATADIR}/cabinet/licenses)
 install(FILES LICENSE DESTINATION ${CMAKE_INSTALL_DATADIR}/cabinet/licenses RENAME GPL-3.0.txt)
 

@@ -40,7 +40,8 @@ static shaders::Stack test_stack()
     shaders::Stack result;
     result.effects = {shaders::Shader(shaders::Effect::ColorCorrection), shaders::Shader(shaders::Effect::FilmNoise),
                       shaders::Shader(shaders::Effect::ChromaticAberration), shaders::Shader(shaders::Effect::Vignette),
-                      shaders::Shader(shaders::Effect::Cas), shaders::Shader(shaders::Effect::CrtGeom)};
+                      shaders::Shader(shaders::Effect::Cas), shaders::Shader(shaders::Effect::CrtGeom),
+                      shaders::Shader(shaders::Effect::Smaa)};
     return result;
 }
 
@@ -140,6 +141,8 @@ static void controls()
     snapshot.values.shaders.effects[5].enabled = true;
     snapshot.values.shaders.effects[5].parameters[4] = 0;
     snapshot.values.shaders.effects[5].parameters[14] = 35;
+    snapshot.values.shaders.effects[6].enabled = true;
+    snapshot.values.shaders.effects[6].parameters = {0, 85, 20, 12, 50, 2};
     std::swap(snapshot.values.shaders.effects[0], snapshot.values.shaders.effects[1]);
     settings_store::write_game(directory, snapshot);
     RunnerOptions restored;
@@ -231,7 +234,7 @@ static void sort_controls()
     key(ui, SDL_SCANCODE_S);
     auto expected = original;
     expected.effects = {original.effects[1], original.effects[4], original.effects[0], original.effects[2],
-                        original.effects[3], original.effects[5]};
+                        original.effects[3], original.effects[5], original.effects[6]};
     require(ui.shaders == expected && ui.selected == 2,
             "Sort must preserve both groups' order and the selected inactive effect");
     key(ui, SDL_SCANCODE_S);
@@ -267,7 +270,7 @@ static void sort_controls()
     second.parameters[0] = 20;
     duplicates.effects.push_back(second);
     const int selected = duplicates.sort(static_cast<int>(duplicates.effects.size()) - 1);
-    require(selected == 6 && duplicates.effects[selected].parameters[0] == 20,
+    require(selected == 7 && duplicates.effects[selected].parameters[0] == 20,
             "Sort must track the selected instance when effect types repeat");
 }
 
@@ -275,7 +278,7 @@ static void film_controls()
 {
     Frontend ui;
     ui.shaders = test_stack();
-    require(ui.shaders.effects.size() == 6 && ui.shaders.effects[1].effect == shaders::Effect::FilmNoise,
+    require(ui.shaders.effects.size() == 7 && ui.shaders.effects[1].effect == shaders::Effect::FilmNoise,
             "Film grain is missing from the catalog");
     const auto defaults = ui.shaders.effects[1].parameters;
     ui.page = Page::Shaders;
@@ -402,6 +405,309 @@ static void crt_controls()
     ui.selected = 18;
     key(ui, SDL_SCANCODE_RETURN);
     require(ui.shaders.effects[index].parameters == defaults, "CRT restore defaults failed");
+}
+
+static void smaa_controls()
+{
+    Frontend ui;
+    ui.page = Page::Shaders;
+    const int index = effect_index(ui.shaders, shaders::Effect::Smaa);
+    ui.selected = index;
+    const auto defaults = ui.shaders.effects[index].parameters;
+    require(defaults == std::vector<int>({1, 100, 32, 16, 25, 0}) && !ui.shaders.active(),
+            "SMAA defaults differ from the reference");
+    require(shaders::definition(shaders::Effect::Smaa).parameters[0].maximum == 1,
+            "SMAA must not expose depth edge detection");
+    key(ui, SDL_SCANCODE_RIGHT);
+    key(ui, SDL_SCANCODE_RETURN);
+    key(ui, SDL_SCANCODE_LEFT);
+    require(ui.shaders.effects[index].parameters[0] == 0, "SMAA luminance detection selection failed");
+    ui.selected = 1;
+    key(ui, SDL_SCANCODE_RIGHT);
+    require(ui.shaders.effects[index].parameters[1] == 101 &&
+                shaders::parameter_value(shaders::definition(shaders::Effect::Smaa).parameters[1], 101) == "0.101",
+            "SMAA threshold adjustment did not preserve its precision");
+    ui.selected = 6;
+    key(ui, SDL_SCANCODE_RETURN);
+    require(ui.shaders.effects[index].parameters == defaults, "SMAA restore defaults failed");
+}
+
+static std::vector<std::array<int, 3>> smaa_edges_reference(const std::vector<std::array<int, 3>>& image, int width,
+                                                            int height, bool color, double threshold)
+{
+    auto sample = [&](int x, int y)
+    {
+        return image[std::clamp(y, 0, height - 1) * width + std::clamp(x, 0, width - 1)];
+    };
+    auto delta = [&](const auto& first, const auto& second)
+    {
+        if (color)
+        {
+            return std::max({std::abs(first[0] - second[0]), std::abs(first[1] - second[1]),
+                             std::abs(first[2] - second[2])}) /
+                   255.0;
+        }
+        return std::abs((first[0] - second[0]) * .2126 + (first[1] - second[1]) * .7152 +
+                        (first[2] - second[2]) * .0722) /
+               255.0;
+    };
+    std::vector<std::array<int, 3>> result(width * height);
+    for (int y = 0; y < height; ++y)
+    {
+        for (int x = 0; x < width; ++x)
+        {
+            const auto center = sample(x, y), left = sample(x - 1, y), top = sample(x, y - 1);
+            const double horizontal = delta(center, left), vertical = delta(center, top);
+            const double maximum =
+                std::max({horizontal, vertical, delta(center, sample(x + 1, y)), delta(center, sample(x, y + 1)),
+                          delta(left, sample(x - 2, y)), delta(top, sample(x, y - 2))});
+            result[y * width + x] = {horizontal >= threshold && horizontal * 2 >= maximum ? 255 : 0,
+                                     vertical >= threshold && vertical * 2 >= maximum ? 255 : 0, 0};
+        }
+    }
+    return result;
+}
+
+static void smaa_pixels(const char* driver)
+{
+    auto* window = SDL_CreateWindow("SMAA pixels", 32, 32, 0);
+    require(window, SDL_GetError());
+    auto* renderer = SDL_CreateRenderer(window, driver);
+    require(renderer, SDL_GetError());
+    {
+        ShaderChain chain;
+        shaders::Stack stack;
+        stack.effects = {shaders::Shader(shaders::Effect::Smaa)};
+        auto& smaa = stack.effects[0];
+        smaa.enabled = true;
+        auto* input = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING, 32, 32);
+        require(input, SDL_GetError());
+        SDL_SetTextureBlendMode(input, SDL_BLENDMODE_NONE);
+        auto upload = [&](const std::vector<std::array<int, 3>>& image)
+        {
+            std::vector<Uint8> bytes(image.size() * 4, 255);
+            for (std::size_t i = 0; i < image.size(); ++i)
+            {
+                std::copy(image[i].begin(), image[i].end(), bytes.begin() + i * 4);
+            }
+            require(SDL_UpdateTexture(input, nullptr, bytes.data(), 32 * 4), SDL_GetError());
+        };
+        auto capture =
+            [&](SDL_Texture* texture, const SDL_FRect* crop = nullptr, bool flipped = false, SDL_Point size = {32, 32})
+        {
+            auto* output = chain.draw(renderer, texture, size.x, size.y, stack, crop, flipped);
+            require(SDL_SetTextureScaleMode(output, SDL_SCALEMODE_NEAREST), SDL_GetError());
+            require(SDL_RenderTexture(renderer, output, nullptr, nullptr), SDL_GetError());
+            auto* surface = SDL_RenderReadPixels(renderer, nullptr);
+            require(surface, SDL_GetError());
+            std::vector<std::array<int, 3>> result(32 * 32);
+            for (int y = 0; y < 32; ++y)
+            {
+                for (int x = 0; x < 32; ++x)
+                {
+                    Uint8 r, g, b, a;
+                    require(SDL_ReadSurfacePixel(surface, x, y, &r, &g, &b, &a), SDL_GetError());
+                    result[y * 32 + x] = {r, g, b};
+                }
+            }
+            SDL_DestroySurface(surface);
+            require(SDL_RenderPresent(renderer), SDL_GetError());
+            return result;
+        };
+        std::vector<std::array<int, 3>> image(32 * 32);
+        for (int y = 0; y < 32; ++y)
+        {
+            for (int x = 0; x < 32; ++x)
+            {
+                // Equal-luminance colors distinguish color from luma detection, with nearby contrast changes.
+                image[y * 32 + x] = y < 16 ? (x < 16 ? std::array<int, 3>{255, 0, 0} : std::array<int, 3>{0, 76, 0})
+                                           : std::array<int, 3>{x * 7, y * 7, (x + y) * 3};
+            }
+        }
+        upload(image);
+        smaa.parameters[5] = 1;
+        for (int color : {0, 1})
+        {
+            smaa.parameters[0] = color;
+            for (int threshold : {50, 100, 200})
+            {
+                smaa.parameters[1] = threshold;
+                require(capture(input) == smaa_edges_reference(image, 32, 32, color, threshold * .001),
+                        "SMAA edge detection differs from the CPU reference");
+            }
+        }
+        smaa = shaders::Shader(shaders::Effect::Smaa);
+        smaa.enabled = true;
+        for (int y = 0; y < 32; ++y)
+        {
+            for (int x = 0; x < 32; ++x)
+            {
+                const int value = y >= 8 + x / 4 ? 255 : 0;
+                image[y * 32 + x] = {value, value, value};
+            }
+        }
+        upload(image);
+        smaa.parameters[3] = 0;
+        smaa.parameters[5] = 2;
+        const auto weights = capture(input);
+        require(std::any_of(weights.begin(), weights.end(),
+                            [](const auto& pixel) { return pixel[0] || pixel[1] || pixel[2]; }),
+                "SMAA blend weights remained empty on a stair-step edge");
+        smaa.parameters[5] = 0;
+        const auto orthogonal = capture(input);
+        require(orthogonal != image, "SMAA did not antialias a stair-step edge");
+        int checked = 0;
+        for (int x = 2; x < 30; x += 4)
+        {
+            const int y = 8 + x / 4;
+            for (int offset : {-1, 0})
+            {
+                const int row = y + offset;
+                const double top_weight = weights[(row + 1) * 32 + x][1] / 255.0;
+                const double bottom_weight = weights[row * 32 + x][0] / 255.0;
+                if (top_weight + bottom_weight == 0)
+                {
+                    continue;
+                }
+                const double center = image[row * 32 + x][0] / 255.0;
+                const double below = image[(row + 1) * 32 + x][0] / 255.0;
+                const double above = image[(row - 1) * 32 + x][0] / 255.0;
+                const double linear = (top_weight * ((1 - top_weight) * center + top_weight * below) +
+                                       bottom_weight * ((1 - bottom_weight) * center + bottom_weight * above)) /
+                                      (top_weight + bottom_weight);
+                const int expected = static_cast<int>(
+                    std::round(255 * (linear <= .0031308 ? 12.92 * linear : 1.055 * std::pow(linear, 1 / 2.4) - .055)));
+                require(std::abs(orthogonal[row * 32 + x][0] - expected) <= 2,
+                        "SMAA neighborhood blending did not interpolate in linear light");
+                ++checked;
+            }
+        }
+        require(checked > 4, "SMAA linear-light checks did not cover enough blended pixels");
+        smaa.parameters[2] = 0;
+        require(capture(input) != orthogonal, "SMAA search radius did not affect blend weights");
+        for (int y = 0; y < 32; ++y)
+        {
+            for (int x = 0; x < 32; ++x)
+            {
+                const int value = y >= 4 + (x / 4) * 3 ? 255 : 0;
+                image[y * 32 + x] = {value, value, value};
+            }
+        }
+        upload(image);
+        smaa.parameters[2] = 112;
+        smaa.parameters[4] = 0;
+        const auto square_corners = capture(input);
+        smaa.parameters[4] = 100;
+        require(capture(input) != square_corners, "SMAA corner rounding did not affect the result");
+        smaa.parameters[2] = 32;
+        smaa.parameters[4] = 25;
+        for (int y = 0; y < 32; ++y)
+        {
+            for (int x = 0; x < 32; ++x)
+            {
+                const int value = x + y >= 31 ? 255 : 0;
+                image[y * 32 + x] = {value, value, value};
+            }
+        }
+        upload(image);
+        smaa.parameters[3] = 0;
+        const auto without_diagonals = capture(input);
+        smaa.parameters[3] = 20;
+        const auto diagonal = capture(input);
+        require(diagonal != image && diagonal != without_diagonals,
+                "SMAA diagonal searches did not affect a diagonal edge");
+        // The same crop must produce identical local edges, weights and final colors, including flipped RGB565.
+        const SDL_FRect crop{3, 4, 32, 32};
+        for (auto format : {SDL_PIXELFORMAT_RGBA32, SDL_PIXELFORMAT_RGB565})
+        {
+            for (bool flipped : {false, true})
+            {
+                auto* padded = SDL_CreateTexture(renderer, format, SDL_TEXTUREACCESS_STREAMING, 40, 40);
+                require(padded, SDL_GetError());
+                SDL_SetTextureBlendMode(padded, SDL_BLENDMODE_NONE);
+                std::vector<Uint8> pixels(40 * 40 * 4, 127);
+                for (int y = 0; y < 32; ++y)
+                {
+                    const int storage_y = flipped ? 35 - y : 4 + y;
+                    for (int x = 0; x < 32; ++x)
+                    {
+                        std::copy(image[y * 32 + x].begin(), image[y * 32 + x].end(),
+                                  pixels.begin() + (storage_y * 40 + 3 + x) * 4);
+                        pixels[(storage_y * 40 + 3 + x) * 4 + 3] = 255;
+                    }
+                }
+                const int pitch = 40 * SDL_BYTESPERPIXEL(format);
+                std::vector<Uint8> converted(pitch * 40);
+                require(SDL_ConvertPixels(40, 40, SDL_PIXELFORMAT_RGBA32, pixels.data(), 160, format, converted.data(),
+                                          pitch),
+                        SDL_GetError());
+                require(SDL_UpdateTexture(padded, nullptr, converted.data(), pitch), SDL_GetError());
+                for (int debug : {0, 1, 2})
+                {
+                    smaa.parameters[5] = debug;
+                    const auto expected = capture(input);
+                    const auto actual = capture(padded, &crop, flipped, {40, 40});
+                    for (std::size_t i = 0; i < actual.size(); ++i)
+                    {
+                        for (int channel = 0; channel < 3; ++channel)
+                        {
+                            require(std::abs(actual[i][channel] - expected[i][channel]) <= 2,
+                                    "SMAA sampled outside the crop or mishandled flipped/converted input");
+                        }
+                    }
+                }
+                SDL_DestroyTexture(padded);
+            }
+        }
+        image.assign(32 * 32, {127, 127, 127});
+        upload(image);
+        for (int debug : {1, 2, 0})
+        {
+            smaa.parameters[5] = debug;
+            const auto flat = capture(input);
+            require(debug ? std::all_of(flat.begin(), flat.end(),
+                                        [](const auto& pixel) { return pixel == std::array<int, 3>{0, 0, 0}; })
+                          : flat == image,
+                    "SMAA retained old edges/weights or changed flat input");
+        }
+        // Resize to a single pixel, then disable to release all three passes and their lookup textures.
+        const SDL_FRect single{0, 0, 1, 1};
+        require(capture(input, &single) == image, "SMAA failed on a one-pixel viewport");
+        for (int y = 0; y < 32; ++y)
+        {
+            for (int x = 0; x < 32; ++x)
+            {
+                const int value = x + y >= 31 ? 255 : 0;
+                image[y * 32 + x] = {value, value, value};
+            }
+        }
+        upload(image);
+        const auto smaa_only = capture(input);
+        stack.effects.emplace_back(shaders::Effect::ColorCorrection);
+        stack.effects[1].enabled = true;
+        stack.effects[1].parameters[0] = 20;
+        const auto color_after = capture(input);
+        for (std::size_t i = 0; i < color_after.size(); ++i)
+        {
+            require(std::abs(color_after[i][0] - std::min(255, smaa_only[i][0] + 51)) <= 1,
+                    "The effect after SMAA did not use the final neighborhood result");
+        }
+        std::swap(stack.effects[0], stack.effects[1]);
+        require(capture(input) != color_after, "Moving SMAA across color correction did not change the result");
+        stack.effects[1].enabled = false;
+        const auto color_only = capture(input);
+        for (std::size_t i = 0; i < color_only.size(); ++i)
+        {
+            require(std::abs(color_only[i][0] - std::min(255, image[i][0] + 51)) <= 1,
+                    "Replacing SMAA with a single-pass effect retained stale resources");
+        }
+        stack.effects[0].enabled = false;
+        require(chain.draw(renderer, input, 32, 32, stack) == input && !chain.allocated(),
+                "Disabling SMAA retained multipass resources");
+        SDL_DestroyTexture(input);
+    }
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
 }
 
 static std::array<int, 3> corrected(std::array<int, 3> input, const shaders::Shader& shader)
@@ -744,7 +1050,8 @@ static void viewport_pixels(const char* driver)
         std::array<GamePresentation, 2> presentations;
         shaders::Stack settings;
         settings.effects = {shaders::Shader(shaders::Effect::ChromaticAberration),
-                            shaders::Shader(shaders::Effect::ColorCorrection), shaders::Shader(shaders::Effect::Vignette)};
+                            shaders::Shader(shaders::Effect::ColorCorrection), shaders::Shader(shaders::Effect::Vignette),
+                            shaders::Shader(shaders::Effect::Smaa)};
         settings.effects[0].parameters[4] = 100;
         settings.effects[1].parameters[0] = 15;
         for (const auto* system : {"nds", "3ds"})
@@ -786,10 +1093,11 @@ static void viewport_pixels(const char* driver)
                     require(SDL_UpdateTexture(input, nullptr, upload.data(), pitch), SDL_GetError());
                     secondary.upload(upload.data(), texture_width, texture_height, pitch, format);
                     // End with shaders disabled to verify the original crop/flip presentation path too.
-                    for (int mode : {1, 2, 0})
+                    for (int mode : {1, 2, 3, 0})
                     {
                         settings.effects[0].enabled = settings.effects[1].enabled = mode == 2;
-                        settings.effects[2].enabled = mode != 0;
+                        settings.effects[2].enabled = mode == 1 || mode == 2;
+                        settings.effects[3].enabled = mode == 3;
                         for (int scaling : {0, 2, 3})
                         {
                             for (unsigned screen = 0; screen < 2; ++screen)
@@ -841,7 +1149,7 @@ static void viewport_pixels(const char* driver)
                                     {
                                         expected = corrected(expected, settings.effects[1]);
                                     }
-                                    if (mode != 0)
+                                    if (mode == 1 || mode == 2)
                                     {
                                         const double distance = std::hypot((local_x + .5) / crop.w - .5,
                                                                             (local_y + .5) / crop.h - .5);
@@ -1405,6 +1713,7 @@ int main(int argc, char** argv)
         film_controls();
         cas_controls();
         crt_controls();
+        smaa_controls();
         if (argc > 1)
         {
             pixels(argv[1]);
@@ -1412,6 +1721,7 @@ int main(int argc, char** argv)
             viewport_pixels(argv[1]);
             cas_pixels(argv[1]);
             crt_pixels(argv[1]);
+            smaa_pixels(argv[1]);
         }
         SDL_Quit();
         std::cout << "Shader controls, persistence, bypass and pixels passed\n";

@@ -5,6 +5,8 @@ import argparse
 import copy
 import importlib.util
 import json
+import hashlib
+import zlib
 from pathlib import Path
 import sys
 import tempfile
@@ -19,6 +21,9 @@ spec.loader.exec_module(build)
 def source(metadata, body):
     header = "\n".join("// " + line for line in json.dumps(metadata, indent=2).splitlines())
     return "// cabinet-shader-begin\n" + header + "\n// cabinet-shader-end\n" + body
+
+
+LOOKUP_HASHES = ['35065cef2a02cabcad711d6bf430239ae64e27d71c4e4fa06f29cce2c992f0d2', '3694eae5e9d44b8ebb4415a13f8c7b94dc08a2fc86658434d771c4610fe5744d']
 
 
 class ShaderMetadataTest(unittest.TestCase):
@@ -81,15 +86,59 @@ class ShaderMetadataTest(unittest.TestCase):
         metadata = [entry for entry, _ in catalog]
         self.assertEqual(build.definition(metadata), (generated_dir / "shader_definitions.h").read_text())
         self.assertEqual(build.programs(metadata), (generated_dir / "shader_programs.h").read_text())
-        self.assertEqual([entry["id"] for entry in metadata], ["cas", "chromatic_aberration", "color_correction", "crt_geom", "film_noise", "vignette"])
+        self.assertEqual([entry["id"] for entry in metadata], ["cas", "chromatic_aberration", "color_correction", "crt_geom", "film_noise", "smaa", "vignette"])
 
     def test_generated_gl_matches_shaders(self):
         for metadata, body in build.load_catalog(ROOT):
-            _, _, vertex, fragment = build.sources(metadata, body)
             shader_id = metadata["id"]
             embedded = (generated_dir / f"{shader_id}_shaders.h").read_text()
-            for name, code in (("vertex", vertex), ("fragment", fragment)):
-                self.assertIn(f'{shader_id}_gl_{name} = R"shader({code})shader";', embedded)
+            for stage in range(len(build.pass_entries(metadata))):
+                _, _, vertex, fragment = build.sources(metadata, body, stage)
+                symbol = f"{shader_id}_{stage}"
+                for name, code in (("vertex", vertex), ("fragment", fragment)):
+                    self.assertTrue(f'{symbol}_gl_{name} = R"shader({code})shader";' in embedded, f"Generated {symbol} {name} is stale")
+
+    def test_smaa_passes_and_embedded_lookup_tables(self):
+        metadata, body = build.parse_shader((ROOT / "assets/shaders/effects/smaa.glsl").read_text())
+        self.assertEqual(build.pass_entries(metadata), ["smaa_detect", "smaa_weights", "smaa_blend"])
+        self.assertEqual(len(metadata["parameters"]), 6)
+        self.assertEqual(metadata["parameters"][0]["maximum"], 1)
+        self.assertFalse(any("depth" in parameter["symbol"] or "predication" in parameter["symbol"]
+                             for parameter in metadata["parameters"]))
+        self.assertEqual([(texture["width"], texture["height"], texture["channels"], texture["linear"])
+                          for texture in metadata["textures"]], [(160, 560, 2, True), (64, 16, 1, False)])
+        for texture, digest in zip(metadata["textures"], LOOKUP_HASHES):
+            self.assertEqual(hashlib.sha256(build.texture_data(texture)).hexdigest(), digest)
+        for stage in range(3):
+            _, fragment, _, gl_fragment = build.sources(metadata, body, stage)
+            for code in (fragment, gl_fragment):
+                self.assertIn(f"#define CABINET_PASS {stage}", code)
+                self.assertIn("float edge_threshold()", code)
+                self.assertIn(f"= {metadata['passes'][stage]}(", code)
+                self.assertIn("sample_area_texture(vec2 position)", code)
+                for previous in range(stage):
+                    self.assertIn(f"sample_pass_{previous}(vec2 position)", code)
+            self.assertIn(f"layout(binding={stage + 1}) uniform sampler2D area_texture;", fragment)
+            self.assertIn(f"layout(binding={stage + 2}) uniform sampler2D search_texture;", fragment)
+
+    def test_invalid_passes_and_textures_are_rejected(self):
+        metadata, body = build.parse_shader((ROOT / "assets/shaders/effects/smaa.glsl").read_text())
+        for passes in ([], ["bad entry"], [1], "smaa_blend", ["smaa_detect"] * 5, ["wrong_final_entry"]):
+            changed = dict(metadata, passes=passes)
+            with self.assertRaises(ValueError):
+                build.parse_shader(source(changed, body))
+        with self.assertRaises(ValueError):
+            build.parse_shader(source(dict(metadata, context=False), body))
+        for changes in ({"width": 0}, {"height": 2049}, {"channels": 5}, {"channels": True},
+                        {"linear": "yes"}, {"name": "frame"}, {"name": "pass_0"}, {"data": ["invalid"]},
+                        {"width": 159}):
+            changed = copy.deepcopy(metadata)
+            changed["textures"][0].update(changes)
+            with self.assertRaises((ValueError, zlib.error)):
+                build.parse_shader(source(changed, body))
+        for textures in ([metadata["textures"][0]] * 2, metadata["textures"] * 2):
+            with self.assertRaises(ValueError):
+                build.parse_shader(source(dict(metadata, textures=textures), body))
 
     def test_context_supplies_animation_and_cropped_sampling(self):
         metadata, body = build.parse_shader((ROOT / "assets/shaders/effects/film_noise.glsl").read_text())

@@ -1,8 +1,78 @@
 #include "shader_chain.h"
 #include "shader_pass.h"
+#include "shader_programs.h"
 #include <cmath>
 #include <stdexcept>
 #include <string_view>
+
+namespace
+{
+struct EffectPass : ShaderPass
+{
+    SDL_Renderer* renderer;
+    std::vector<std::unique_ptr<ShaderPass>> stages;
+    std::vector<SDL_Texture*> lookups;
+
+    EffectPass(SDL_Renderer* renderer, shaders::Effect effect, bool vulkan) : ShaderPass(effect), renderer(renderer)
+    {
+        const auto& program = shaders::program(effect);
+        for (std::size_t stage = 0; stage < program.stages.size(); ++stage)
+        {
+            stages.push_back(vulkan ? create_vulkan_shader_pass(renderer, effect, stage)
+                                    : create_gl_shader_pass(renderer, effect, stage));
+        }
+    }
+    ~EffectPass() override
+    {
+        stages.clear();
+        for (auto* texture : lookups)
+        {
+            SDL_DestroyTexture(texture);
+        }
+    }
+    SDL_Texture* draw(SDL_Texture* input, unsigned width, unsigned height, const shaders::Shader& settings,
+                      unsigned frame_count, const SDL_FRect& source, bool flipped,
+                      std::span<const ShaderInput> = {}) override
+    {
+        const auto& program = shaders::program(effect);
+        while (lookups.size() < program.textures.size())
+        {
+            const auto& data = program.textures[lookups.size()];
+            auto* texture =
+                SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, data.width, data.height);
+            if (!texture)
+            {
+                throw std::runtime_error(SDL_GetError());
+            }
+            if (!SDL_UpdateTexture(texture, nullptr, data.pixels.data(), data.width * 4))
+            {
+                SDL_DestroyTexture(texture);
+                throw std::runtime_error(SDL_GetError());
+            }
+            SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_NONE);
+            lookups.push_back(texture);
+        }
+        if (stages.size() == 1 && lookups.empty())
+        {
+            return stages.front()->draw(input, width, height, settings, frame_count, source, flipped);
+        }
+        std::array<ShaderInput, shaders::maximum_sampler_count> inputs{};
+        std::size_t previous = 0;
+        SDL_Texture* result = input;
+        for (auto& stage : stages)
+        {
+            for (std::size_t i = 0; i < lookups.size(); ++i)
+            {
+                inputs[previous + i] = {lookups[i], program.textures[i].linear};
+            }
+            result = stage->draw(input, width, height, settings, frame_count, source, flipped,
+                                 std::span(inputs.data(), previous + lookups.size()));
+            inputs[previous++] = {result, true};
+        }
+        return result;
+    }
+};
+} // namespace
 
 struct ShaderChain::Impl
 {
@@ -122,8 +192,7 @@ SDL_Texture* ShaderChain::draw(SDL_Renderer* renderer, SDL_Texture* input, unsig
         }
         if (!state.passes[pass] || state.passes[pass]->effect != shader.effect)
         {
-            state.passes[pass] = vulkan ? create_vulkan_shader_pass(renderer, shader.effect)
-                                      : create_gl_shader_pass(renderer, shader.effect);
+            state.passes[pass] = std::make_unique<EffectPass>(renderer, shader.effect, vulkan);
         }
         if (shaders::definition(shader.effect).output_resolution && output_size.x > 0 && output_size.y > 0)
         {
