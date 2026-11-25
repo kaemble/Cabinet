@@ -50,7 +50,7 @@ class ShaderMetadataTest(unittest.TestCase):
                     self.assertIn(f"vec4 values[{vectors}]", code)
                     self.assertIn(f"values[{(count - 1) // 4}].{'xyzw'[(count - 1) % 4]}", code)
                 self.assertIn("p.source.xy", fragment)
-                self.assertIn("uv * source.xy", gl_fragment)
+                self.assertIn("context.yz + uv * source.xy", gl_fragment)
 
     def test_invalid_metadata_is_rejected(self):
         for changes in (
@@ -95,7 +95,7 @@ class ShaderMetadataTest(unittest.TestCase):
         _, fragment, _, gl_fragment = build.sources(metadata, body)
         self.assertIn("uv, p.context.x,", fragment)
         self.assertIn("uv, context.x,", gl_fragment)
-        self.assertIn("clamp(position, p.source.zw, vec2(1.0) - p.source.zw) * p.source.xy", fragment)
+        self.assertIn("p.context.yz + clamp(position, p.source.zw, vec2(1.0) - p.source.zw) * p.source.xy", fragment)
         self.assertIn("sample_frame(vec2 position)", gl_fragment)
         self.assertIn('"Grain strength"', build.definition([entry for entry, _ in build.load_catalog(ROOT)]))
 

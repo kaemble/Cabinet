@@ -86,18 +86,22 @@ void GamePresentation::draw(SDL_Renderer* renderer, const Image& frame, const SD
 )
 {
     auto* texture = frame.texture;
+    SDL_FRect source =
+        crop ? *crop : SDL_FRect{0, 0, static_cast<float>(frame.width), static_cast<float>(frame.height)};
+    SDL_FlipMode flip = frame.flipped ? SDL_FLIP_VERTICAL : SDL_FLIP_NONE;
+    source = dual_screen::texture_source(source, frame.height, frame.flipped);
     if (frame.shaders && frame.shaders->active())
     {
-        texture = shader_chain.draw(renderer, texture, frame.width, frame.height, *frame.shaders);
+        texture = shader_chain.draw(renderer, texture, frame.width, frame.height, *frame.shaders, &source,
+                                    frame.flipped);
+        source.x = source.y = 0;
+        check(SDL_GetTextureSize(texture, &source.w, &source.h));
+        flip = SDL_FLIP_NONE;
     }
     else
     {
         reset_shaders();
     }
-    SDL_FRect source =
-        crop ? *crop : SDL_FRect{0, 0, static_cast<float>(frame.width), static_cast<float>(frame.height)};
-    SDL_FlipMode flip = frame.flipped ? SDL_FLIP_VERTICAL : SDL_FLIP_NONE;
-    source = dual_screen::texture_source(source, frame.height, frame.flipped);
     const auto filter = (frame.scaling == 1 || frame.scaling == 2) ? SDL_SCALEMODE_LINEAR : SDL_SCALEMODE_NEAREST;
 #ifdef CABINET_ARMADA_DRM
     if (scanout && scanout->native_vulkan())

@@ -375,7 +375,7 @@ struct VulkanPass : ShaderPass
         SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_NONE);
     }
     SDL_Texture* draw(SDL_Texture* input, unsigned frame_width, unsigned frame_height,
-                      const shaders::Shader& settings, unsigned frame_count) override
+                      const shaders::Shader& settings, unsigned frame_count, const SDL_FRect& crop, bool flipped) override
     {
         if (!SDL_FlushRenderer(renderer))
         {
@@ -436,17 +436,12 @@ struct VulkanPass : ShaderPass
         VkRect2D scissor{{0, 0}, {width, height}};
         vkCmdSetViewport(slot.command, 0, 1, &viewport);
         vkCmdSetScissor(slot.command, 0, 1, &scissor);
-        float input_width, input_height;
-        SDL_GetTextureSize(input, &input_width, &input_height);
         const auto values = shaders::uniform_values(settings);
         const auto size = shaders::parameter_vector_count(effect) * 4;
         std::array<float, (shaders::maximum_parameter_vectors + 2) * 4> parameters{};
         std::copy_n(values.begin(), size, parameters.begin());
-        parameters[size] = width / input_width;
-        parameters[size + 1] = height / input_height;
-        parameters[size + 2] = 0.5f / width;
-        parameters[size + 3] = 0.5f / height;
-        parameters[size + 4] = float(frame_count % 65536);
+        const auto source_values = shader_source_values(input, crop, flipped, frame_count);
+        std::copy(source_values.begin(), source_values.end(), parameters.begin() + size);
         vkCmdPushConstants(slot.command, layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                            static_cast<std::uint32_t>((size + 8) * sizeof(float)), parameters.data());
         vkCmdDraw(slot.command, 3, 1, 0, 0);

@@ -228,7 +228,7 @@ struct GlPass : ShaderPass
         bind_buffer(GL_ARRAY_BUFFER, previous_buffer);
     }
     SDL_Texture* draw(SDL_Texture* input, unsigned frame_width, unsigned frame_height,
-                      const shaders::Shader& settings, unsigned frame_count) override
+                      const shaders::Shader& settings, unsigned frame_count, const SDL_FRect& crop, bool flipped) override
     {
         if (!SDL_FlushRenderer(renderer))
         {
@@ -339,14 +339,11 @@ struct GlPass : ShaderPass
             bind_texture(GL_TEXTURE_2D, static_cast<GLuint>(native));
             use_program(program);
             const auto values = shaders::uniform_values(settings);
-            float input_width, input_height;
-            SDL_GetTextureSize(input, &input_width, &input_height);
-            const std::array<float, 4> source{width / input_width, height / input_height, 0.5f / width, 0.5f / height};
-            const std::array<float, 4> context{float(frame_count % 65536), 0, 0, 0};
+            const auto source = shader_source_values(input, crop, flipped, frame_count);
             uniform_1i(frame_uniform, 0);
             uniform_4fv(values_uniform, static_cast<GLsizei>(shaders::parameter_vector_count(effect)), values.data());
             uniform_4fv(source_uniform, 1, source.data());
-            uniform_4fv(context_uniform, 1, context.data());
+            uniform_4fv(context_uniform, 1, source.data() + 4);
             bind_buffer(GL_ARRAY_BUFFER, buffer);
             attribute_pointer(0, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
             enable_attribute(0);

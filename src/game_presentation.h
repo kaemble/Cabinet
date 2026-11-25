@@ -9,8 +9,8 @@
 class ArmadaDrm;
 #endif
 
-// Composes one game view. Source images are borrowed; only the Sharp Bilinear
-// intermediates belong to this object. Reset it before destroying its renderer.
+// Composes one game view. Source images are borrowed; effect textures and Sharp
+// Bilinear intermediates belong to this object. Reset it before destroying its renderer.
 class GamePresentation
 {
 public:

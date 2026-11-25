@@ -1,4 +1,6 @@
 #include "frontend.h"
+#include "game_presentation.h"
+#include "secondary_window.h"
 #include "shader_chain.h"
 #include "settings_store.h"
 #include "ui_text.h"
@@ -553,6 +555,160 @@ static void film_pixels(const char* driver)
     SDL_DestroyWindow(window);
 }
 
+static void viewport_pixels(const char* driver)
+{
+    auto* window = SDL_CreateWindow("Viewport shaders", 320, 240, 0);
+    require(window, SDL_GetError());
+    auto* renderer = SDL_CreateRenderer(window, driver);
+    require(renderer, SDL_GetError());
+    {
+        SecondaryWindow secondary;
+        secondary.create(window, renderer, nullptr, nullptr, "Viewport shaders", 320, 240);
+        std::array<GamePresentation, 2> presentations;
+        shaders::Stack settings;
+        settings.effects = {shaders::Shader(shaders::Effect::ChromaticAberration),
+                            shaders::Shader(shaders::Effect::ColorCorrection), shaders::Shader(shaders::Effect::Vignette)};
+        settings.effects[0].parameters[4] = 100;
+        settings.effects[1].parameters[0] = 15;
+        for (const auto* system : {"nds", "3ds"})
+        {
+            const unsigned width = std::string_view(system) == "nds" ? 64 : 80;
+            const unsigned height = 96;
+            const unsigned texture_width = width + 16, texture_height = height + 16;
+            const auto screens = dual_screen::views(system, 320, 240);
+            for (auto format : {SDL_PIXELFORMAT_RGBA32, SDL_PIXELFORMAT_RGB565})
+            {
+                for (bool flipped : {false, true})
+                {
+                    auto* input = SDL_CreateTexture(renderer, format, SDL_TEXTUREACCESS_STREAMING,
+                                                    texture_width, texture_height);
+                    require(input, SDL_GetError());
+                    SDL_SetTextureBlendMode(input, SDL_BLENDMODE_NONE);
+                    std::vector<Uint8> image(texture_width * texture_height * 4);
+                    for (unsigned y = 0; y < texture_height; ++y)
+                    {
+                        for (unsigned x = 0; x < texture_width; ++x)
+                        {
+                            const unsigned logical_y = (flipped && y < height) ? height - 1 - y : y;
+                            const unsigned screen = logical_y < height / 2 ? 0 : 1;
+                            const auto source = dual_screen::pixels(screens[screen].source, width, height);
+                            const auto offset = (y * texture_width + x) * 4;
+                            const bool visible = y < height && x >= source.x && x < source.x + source.w;
+                            image[offset] = visible ? 40 + x - static_cast<unsigned>(source.x) : 255;
+                            image[offset + 1] = visible ? 60 + logical_y - static_cast<unsigned>(source.y) : 0;
+                            image[offset + 2] = visible ? 100 + screen * 40 + x - static_cast<unsigned>(source.x) : 255;
+                            image[offset + 3] = 255;
+                        }
+                    }
+                    const int pitch = texture_width * SDL_BYTESPERPIXEL(format);
+                    std::vector<Uint8> upload(pitch * texture_height);
+                    require(SDL_ConvertPixels(texture_width, texture_height, SDL_PIXELFORMAT_RGBA32, image.data(),
+                                               texture_width * 4, format, upload.data(), pitch), SDL_GetError());
+                    require(SDL_ConvertPixels(texture_width, texture_height, format, upload.data(), pitch,
+                                               SDL_PIXELFORMAT_RGBA32, image.data(), texture_width * 4), SDL_GetError());
+                    require(SDL_UpdateTexture(input, nullptr, upload.data(), pitch), SDL_GetError());
+                    secondary.upload(upload.data(), texture_width, texture_height, pitch, format);
+                    // End with shaders disabled to verify the original crop/flip presentation path too.
+                    for (int mode : {1, 2, 0})
+                    {
+                        settings.effects[0].enabled = settings.effects[1].enabled = mode == 2;
+                        settings.effects[2].enabled = mode != 0;
+                        for (int scaling : {0, 2, 3})
+                        {
+                            for (unsigned screen = 0; screen < 2; ++screen)
+                            {
+                                auto* target = screen ? secondary.renderer : renderer;
+                                if (screen)
+                                {
+                                    secondary.begin_draw();
+                                }
+                                require(SDL_SetRenderDrawColor(target, 0, 0, 0, 255), SDL_GetError());
+                                require(SDL_RenderClear(target), SDL_GetError());
+                                int output_width, output_height;
+                                require(SDL_GetRenderOutputSize(target, &output_width, &output_height), SDL_GetError());
+                                GamePresentation::Image frame;
+                                frame.texture = screen ? secondary.texture(input) : input;
+                                frame.width = width;
+                                frame.height = height;
+                                frame.scaling = scaling;
+                                frame.flipped = flipped;
+                                frame.shaders = &settings;
+                                const auto view = dual_screen::window_view(system, screen, output_width, output_height);
+                                const auto crop = dual_screen::pixels(view.source, width, height);
+                                const auto destination = GamePresentation::screen_viewport(frame, view);
+                                presentations[screen].draw(target, frame, destination, &crop);
+                                auto* surface = SDL_RenderReadPixels(target, nullptr);
+                                require(surface, SDL_GetError());
+                                for (float position : {.125f, .375f, .5f, .625f, .875f})
+                                {
+                                    const int x = static_cast<int>(destination.x + position * destination.w);
+                                    const int y = static_cast<int>(destination.y + position * destination.h);
+                                    const int local_x = static_cast<int>((x + .5f - destination.x) / destination.w * crop.w);
+                                    const int local_y = static_cast<int>((y + .5f - destination.y) / destination.h * crop.h);
+                                    const unsigned source_y = static_cast<unsigned>(crop.y) + local_y;
+                                    const unsigned storage_y = flipped ? height - 1 - source_y : source_y;
+                                    const unsigned source_x = static_cast<unsigned>(crop.x) + local_x;
+                                    std::array<int, 3> expected{};
+                                    for (int channel = 0; channel < 3; ++channel)
+                                    {
+                                        unsigned channel_x = source_x;
+                                        if (mode == 2 && channel == 2)
+                                        {
+                                            const auto shifted = std::min(static_cast<int>(crop.w) - 1,
+                                                                          static_cast<int>(local_x + .5f + .01f * crop.w));
+                                            channel_x = static_cast<unsigned>(crop.x) + shifted;
+                                        }
+                                        expected[channel] = image[(storage_y * texture_width + channel_x) * 4 + channel];
+                                    }
+                                    if (mode == 2)
+                                    {
+                                        expected = corrected(expected, settings.effects[1]);
+                                    }
+                                    if (mode != 0)
+                                    {
+                                        const double distance = std::hypot((local_x + .5) / crop.w - .5,
+                                                                            (local_y + .5) / crop.h - .5);
+                                        const double t = std::clamp((distance - .25) / .5, 0.0, 1.0);
+                                        const double factor = 1 - t * t * (3 - 2 * t);
+                                        for (auto& channel : expected)
+                                        {
+                                            channel = static_cast<int>(std::round(channel * factor));
+                                        }
+                                    }
+                                    Uint8 r, g, b, a;
+                                    require(SDL_ReadSurfacePixel(surface, x, y, &r, &g, &b, &a), SDL_GetError());
+                                    if (std::abs(int(r) - expected[0]) > 3 || std::abs(int(g) - expected[1]) > 3 ||
+                                        std::abs(int(b) - expected[2]) > 3)
+                                    {
+                                        std::cerr << driver << ' ' << system << " screen " << screen << " flipped " << flipped
+                                                  << " mode " << mode << " scaling " << scaling << " position " << position
+                                                  << " got " << int(r) << ',' << int(g) << ',' << int(b) << " expected "
+                                                  << expected[0] << ',' << expected[1] << ',' << expected[2] << '\n';
+                                        throw std::runtime_error("Shaders did not use viewport-local coordinates and sampling");
+                                    }
+                                }
+                                SDL_DestroySurface(surface);
+                                require(SDL_RenderPresent(target), SDL_GetError());
+                                if (screen)
+                                {
+                                    secondary.end_draw();
+                                }
+                            }
+                        }
+                    }
+                    for (auto& presentation : presentations)
+                    {
+                        presentation.reset();
+                    }
+                    SDL_DestroyTexture(input);
+                }
+            }
+        }
+    }
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
+}
+
 int main(int argc, char** argv)
 {
     try
@@ -565,6 +721,7 @@ int main(int argc, char** argv)
         {
             pixels(argv[1]);
             film_pixels(argv[1]);
+            viewport_pixels(argv[1]);
         }
         SDL_Quit();
         std::cout << "Shader controls, persistence, bypass and pixels passed\n";

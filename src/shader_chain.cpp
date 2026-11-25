@@ -1,5 +1,6 @@
 #include "shader_chain.h"
 #include "shader_pass.h"
+#include <cmath>
 #include <stdexcept>
 #include <string_view>
 
@@ -37,7 +38,7 @@ bool ShaderChain::allocated() const
 }
 
 SDL_Texture* ShaderChain::draw(SDL_Renderer* renderer, SDL_Texture* input, unsigned width, unsigned height,
-                               const shaders::Stack& settings)
+                               const shaders::Stack& settings, const SDL_FRect* crop, bool flipped)
 {
     if (!settings.active())
     {
@@ -56,6 +57,13 @@ SDL_Texture* ShaderChain::draw(SDL_Renderer* renderer, SDL_Texture* input, unsig
     {
         impl = std::make_unique<Impl>();
         impl->renderer = renderer;
+    }
+    SDL_FRect source = crop ? *crop : SDL_FRect{0, 0, float(width), float(height)};
+    width = static_cast<unsigned>(std::lround(source.w));
+    height = static_cast<unsigned>(std::lround(source.h));
+    if (!width || !height)
+    {
+        throw std::runtime_error("Empty shader viewport");
     }
     auto& state = *impl;
     const bool vulkan = std::string_view(SDL_GetRendererName(renderer)) == "vulkan";
@@ -87,9 +95,9 @@ SDL_Texture* ShaderChain::draw(SDL_Renderer* renderer, SDL_Texture* input, unsig
         SDL_ScaleMode filter;
         SDL_GetTextureScaleMode(input, &filter);
         SDL_SetTextureScaleMode(input, SDL_SCALEMODE_NEAREST);
-        const SDL_FRect source{0, 0, float(width), float(height)};
         const bool target_set = SDL_SetRenderTarget(renderer, state.normalized);
-        const bool copied = target_set && SDL_RenderTexture(renderer, input, &source, nullptr);
+        const bool copied = target_set && SDL_RenderTextureRotated(renderer, input, &source, nullptr, 0, nullptr,
+                                                                   flipped ? SDL_FLIP_VERTICAL : SDL_FLIP_NONE);
         const bool restored = SDL_SetRenderTarget(renderer, previous);
         SDL_SetTextureScaleMode(input, filter);
         if (!copied || !restored)
@@ -97,6 +105,8 @@ SDL_Texture* ShaderChain::draw(SDL_Renderer* renderer, SDL_Texture* input, unsig
             throw std::runtime_error(SDL_GetError());
         }
         input = state.normalized;
+        source = {0, 0, float(width), float(height)};
+        flipped = false;
     }
     std::size_t pass = 0;
     const unsigned frame_count = state.frame_count++;
@@ -115,7 +125,9 @@ SDL_Texture* ShaderChain::draw(SDL_Renderer* renderer, SDL_Texture* input, unsig
             state.passes[pass] = vulkan ? create_vulkan_shader_pass(renderer, shader.effect)
                                       : create_gl_shader_pass(renderer, shader.effect);
         }
-        input = state.passes[pass++]->draw(input, width, height, shader, frame_count);
+        input = state.passes[pass++]->draw(input, width, height, shader, frame_count, source, flipped);
+        source = {0, 0, float(width), float(height)};
+        flipped = false;
     }
     state.passes.resize(pass);
     return input;

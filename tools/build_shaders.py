@@ -146,8 +146,8 @@ uniform sampler2D frame;
         helper = ""
         if metadata.get("context", False):
             helper = "vec3 sample_frame(vec2 position)\n{\n"
-            helper += f"    return {texture}(frame, clamp(position, {prefix}source.zw, vec2(1.0) - {prefix}source.zw) * {prefix}source.xy).rgb;\n}}\n"
-        arguments = [f"{texture}(frame, uv * {prefix}source.xy).rgb"]
+            helper += f"    return {texture}(frame, {prefix}context.yz + clamp(position, {prefix}source.zw, vec2(1.0) - {prefix}source.zw) * {prefix}source.xy).rgb;\n}}\n"
+        arguments = [f"{texture}(frame, {prefix}context.yz + uv * {prefix}source.xy).rgb"]
         if metadata.get("context", False):
             arguments += ["uv", f"{prefix}context.x"]
         arguments += [f"{prefix}values[{i // 4}].{'xyzw'[i % 4]}" for i in range(len(metadata["parameters"]))]
