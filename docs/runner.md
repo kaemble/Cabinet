@@ -2,10 +2,6 @@
 
 `cabinet-runner` runs independently of Home, SQLite, and the library database. It embeds SDL and font/icon assets, and requires FreeType, the Vulkan loader, and the selected core's runtime libraries. See [building](building.md) for a runner-only build.
 
-On Linux (x86-64 and ARM64), the runner installs a seccomp filter before initializing SDL or loading a core. It allows only UNIX and netlink socket creation, preserving local display, audio, and device discovery while blocking IPv4, IPv6, and other network socket families. It also disables io_uring to prevent socket creation through that interface. Filtering applies to all runner threads and future child processes; Home is unaffected. No root privileges or user namespaces are required, and startup fails if the filter cannot be installed. Remote displays and network audio are unavailable.
-
-This blocks direct network socket creation, not all possible communication: inherited sockets and descriptors received from local services remain usable, and filesystem access is unrestricted. It is not a complete sandbox for hostile cores. Other platforms do not currently enforce this restriction.
-
 ## Launch content
 
 ```sh

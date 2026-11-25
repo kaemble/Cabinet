@@ -1,5 +1,4 @@
 #include "runner_options.h"
-#include "runner_network.h"
 #include <SDL3/SDL.h>
 #include <iostream>
 #include <exception>
@@ -15,7 +14,6 @@ int main(int argc, char** argv)
             print_runner_help(std::cout);
             return 0;
         }
-        restrict_runner_network();
         result = run_game(options);
     }
     catch (const std::exception& error)
