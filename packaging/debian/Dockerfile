@@ -9,7 +9,7 @@ RUN rm -f /etc/apt/sources.list.d/debian.sources && \
     case "$TARGET_ARCH" in amd64|arm64) ;; *) exit 1 ;; esac && \
     if [ "$(dpkg --print-architecture)" != "$TARGET_ARCH" ]; then dpkg --add-architecture "$TARGET_ARCH"; fi && \
     apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates nlohmann-json3-dev build-essential cmake ninja-build python3 pkg-config nasm git \
+    ca-certificates nlohmann-json3-dev build-essential cmake ninja-build python3 pkg-config nasm git glslang-tools \
     wayland-protocols libwayland-bin xvfb \
     && if [ "$(dpkg --print-architecture)" != "$TARGET_ARCH" ]; then \
         test "$TARGET_ARCH" = arm64 && apt-get install -y --no-install-recommends crossbuild-essential-arm64; \

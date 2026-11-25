@@ -907,10 +907,10 @@ std::vector<std::string> Frontend::rows() const
     {
         std::vector<std::string> result;
         const auto& shader = shaders.effects.at(shader_selection);
-        for (std::size_t i = 0; i < shaders::color_parameters.size(); ++i)
+        for (std::size_t i = 0; i < shader_parameters().size(); ++i)
         {
-            result.push_back(std::string(shaders::color_parameters[i].name) + ": " +
-                             std::to_string(shader.parameters[i]) + "%");
+            result.push_back(std::string(shader_parameters()[i].name) + ": " +
+                             std::to_string(shader.parameters[i]) + shader_parameters()[i].suffix);
         }
         result.push_back("Restore defaults");
         result.push_back("Back");
@@ -919,11 +919,11 @@ std::vector<std::string> Frontend::rows() const
     case Page::ShaderParameterValues:
     {
         std::vector<std::string> result;
-        const auto& parameter = shaders::color_parameters[shader_parameter];
+        const auto& parameter = shader_parameters()[shader_parameter];
         const int current = shaders.effects.at(shader_selection).parameters[shader_parameter];
         for (int value = parameter.minimum; value <= parameter.maximum; value += parameter.step)
         {
-            result.push_back(std::to_string(value) + "%" + ((value == current) ? " (current)" : ""));
+            result.push_back(std::to_string(value) + parameter.suffix + ((value == current) ? " (current)" : ""));
         }
         result.push_back("Back");
         return result;
@@ -959,6 +959,11 @@ void Frontend::navigate(int direction)
         selected = (selected + direction + count) % count;
     }
 }
+std::span<const shaders::Parameter> Frontend::shader_parameters() const
+{
+    return shaders::definition(shaders.effects.at(shader_selection).effect).parameters;
+}
+
 void Frontend::discard_shader_move()
 {
     if (shader_move)
@@ -1139,10 +1144,10 @@ int Frontend::controls_row() const
 }
 void Frontend::adjust(int direction)
 {
-    if (page == Page::ShaderParameters && selected >= 0 && selected < static_cast<int>(shaders::color_parameters.size()))
+    if (page == Page::ShaderParameters && selected >= 0 && selected < static_cast<int>(shader_parameters().size()))
     {
         auto& value = shaders.effects.at(shader_selection).parameters[selected];
-        const auto& parameter = shaders::color_parameters[selected];
+        const auto& parameter = shader_parameters()[selected];
         value = std::clamp(value + direction * parameter.step, parameter.minimum, parameter.maximum);
         return;
     }
@@ -1236,17 +1241,18 @@ void Frontend::activate()
         }
         break;
     case Page::ShaderParameters:
-        if (selected >= 0 && selected < static_cast<int>(shaders::color_parameters.size()))
+        if (selected >= 0 && selected < static_cast<int>(shader_parameters().size()))
         {
             shader_parameter = selected;
-            const auto& parameter = shaders::color_parameters[selected];
+            const auto& parameter = shader_parameters()[selected];
             selected = (shaders.effects.at(shader_selection).parameters[selected] - parameter.minimum) / parameter.step;
             page = Page::ShaderParameterValues;
             blocked = true;
         }
-        else if (selected == static_cast<int>(shaders::color_parameters.size()))
+        else if (selected == static_cast<int>(shader_parameters().size()))
         {
-            shaders.effects.at(shader_selection).parameters = shaders::Shader{}.parameters;
+            auto& shader = shaders.effects.at(shader_selection);
+            shader.parameters = shaders::Shader(shader.effect).parameters;
         }
         else
         {
@@ -1255,7 +1261,7 @@ void Frontend::activate()
         break;
     case Page::ShaderParameterValues:
     {
-        const auto& parameter = shaders::color_parameters[shader_parameter];
+        const auto& parameter = shader_parameters()[shader_parameter];
         const int value = parameter.minimum + selected * parameter.step;
         if (value >= parameter.minimum && value <= parameter.maximum)
         {
@@ -1760,7 +1766,7 @@ void Frontend::draw(SDL_Renderer* renderer, TextRenderer& font, int width, int h
             heading = shaders::name(shaders.effects.at(shader_selection).effect);
             break;
         case Page::ShaderParameterValues:
-            heading = shaders::color_parameters[shader_parameter].name;
+            heading = shader_parameters()[shader_parameter].name;
             break;
         case Page::Video:
             heading = "Video / " + scope;
@@ -1922,14 +1928,15 @@ void Frontend::draw(SDL_Renderer* renderer, TextRenderer& font, int width, int h
         }
         else if (page == Page::ShaderParameters)
         {
-            description = selected < static_cast<int>(shaders::color_parameters.size())
-                              ? shaders::color_parameters[selected].description
-                          : selected == static_cast<int>(shaders::color_parameters.size()) ? "Restore default shader parameters"
-                                                                                         : "Return to Shaders";
+            description = selected < static_cast<int>(shader_parameters().size())
+                              ? shader_parameters()[selected].description
+                          : selected == static_cast<int>(shader_parameters().size())
+                              ? "Restore default shader parameters"
+                              : "Return to Shaders";
         }
         else if (page == Page::ShaderParameterValues)
         {
-            description = shaders::color_parameters[shader_parameter].description;
+            description = shader_parameters()[shader_parameter].description;
         }
         else if (page == Page::Video)
         {

@@ -4,7 +4,7 @@ Cabinet is an SDL3 game-library frontend and libretro runner. Browse and organiz
 
 ## Build and run
 
-Requires Python 3.12+, CMake 3.20+, a C++20 compiler, pinned static SDL3, and development packages for FreeType, Vulkan, SQLite3, LibArchive, JPEG, libcurl, nlohmann_json, and OpenSSL Crypto. See [building](docs/building.md) for platform dependencies and release builds.
+Requires Python 3.12+, CMake 3.20+, a C++20 compiler, `glslangValidator`, pinned static SDL3, and development packages for FreeType, Vulkan, SQLite3, LibArchive, JPEG, libcurl, nlohmann_json, and OpenSSL Crypto. See [building](docs/building.md) for platform dependencies and release builds.
 
 ```sh
 python3 tools/build_sdl.py --jobs 6

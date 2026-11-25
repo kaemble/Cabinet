@@ -201,6 +201,7 @@ private:
     bool previous_move = false;
     std::optional<shaders::Stack> shader_move;
     int shader_selection = 0, shader_parameter = 0;
+    std::span<const shaders::Parameter> shader_parameters() const;
     void discard_shader_move();
     void toggle_shader();
     void move_shader();

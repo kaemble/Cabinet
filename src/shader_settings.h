@@ -1,6 +1,6 @@
 #pragma once
 
-#include "color_correction_definition.h"
+#include "shader_definitions.h"
 #include <algorithm>
 #include <array>
 #include <iomanip>
@@ -11,45 +11,53 @@
 
 namespace shaders
 {
-enum class Effect
-{
-    ColorCorrection
-};
-
 struct Shader
 {
-    Effect effect = Effect::ColorCorrection;
+    Effect effect;
     bool enabled = false;
-    std::array<int, color_parameters.size()> parameters = []
+    std::vector<int> parameters;
+    explicit Shader(Effect effect = definitions.front().effect) : effect(effect)
     {
-        std::array<int, color_parameters.size()> result{};
-        for (std::size_t i = 0; i < result.size(); ++i)
+        for (const auto& parameter : definition(effect).parameters)
         {
-            result[i] = color_parameters[i].initial;
+            parameters.push_back(parameter.initial);
         }
-        return result;
-    }();
+    }
     bool operator==(const Shader&) const = default;
 };
 
-inline std::array<float, parameter_vector_count * 4> uniform_values(const Shader& shader)
+inline std::size_t parameter_vector_count(Effect effect)
 {
-    std::array<float, parameter_vector_count * 4> values{};
-    for (std::size_t i = 0; i < shader.parameters.size(); ++i)
+    return (definition(effect).parameters.size() + 3) / 4;
+}
+
+inline std::array<float, maximum_parameter_vectors * 4> uniform_values(const Shader& shader)
+{
+    std::array<float, maximum_parameter_vectors * 4> values{};
+    const auto& parameters = definition(shader.effect).parameters;
+    for (std::size_t i = 0; i < parameters.size(); ++i)
     {
-        values[i] = shader.parameters[i] * color_parameters[i].scale;
+        values[i] = shader.parameters.at(i) * parameters[i].scale;
     }
     return values;
 }
 
-inline const char* name(Effect)
+inline const char* name(Effect effect)
 {
-    return color_name;
+    return definition(effect).name;
 }
 
 struct Stack
 {
-    std::vector<Shader> effects{Shader{}};
+    std::vector<Shader> effects = []
+    {
+        std::vector<Shader> result;
+        for (const auto& entry : definitions)
+        {
+            result.emplace_back(entry.effect);
+        }
+        return result;
+    }();
     bool operator==(const Stack&) const = default;
     bool active() const
     {
@@ -80,7 +88,7 @@ struct Stack
     {
         for (const auto& shader : effects)
         {
-            out << "shader " << std::quoted(color_id) << ' ' << shader.enabled;
+            out << "shader " << std::quoted(definition(shader.effect).id) << ' ' << shader.enabled;
             for (int value : shader.parameters)
             {
                 out << ' ' << value;
@@ -92,24 +100,35 @@ struct Stack
     {
         std::string id;
         int enabled;
-        Shader shader;
-        if (!(in >> std::quoted(id) >> enabled) || id != color_id || (enabled != 0 && enabled != 1))
+        if (!(in >> std::quoted(id) >> enabled) || (enabled != 0 && enabled != 1))
         {
             return;
         }
+        const auto entry = std::find_if(definitions.begin(), definitions.end(),
+                                        [&](const Definition& definition) { return id == definition.id; });
+        if (entry == definitions.end())
+        {
+            return;
+        }
+        Shader shader(entry->effect);
         for (std::size_t i = 0; i < shader.parameters.size(); ++i)
         {
             int value;
-            const auto& parameter = color_parameters[i];
+            const auto& parameter = entry->parameters[i];
             if (!(in >> value) || value < parameter.minimum || value > parameter.maximum)
             {
                 return;
             }
             shader.parameters[i] = value;
         }
+        in >> std::ws;
+        if (!in.eof())
+        {
+            return;
+        }
         shader.enabled = enabled != 0;
-        auto found = std::find_if(effects.begin(), effects.end(),
-                                  [&](const Shader& entry) { return entry.effect == shader.effect; });
+        const auto found = std::find_if(effects.begin(), effects.end(),
+                                        [&](const Shader& value) { return value.effect == shader.effect; });
         if (found != effects.end())
         {
             effects.erase(found);

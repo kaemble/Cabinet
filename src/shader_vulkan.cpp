@@ -1,5 +1,5 @@
 #include "shader_pass.h"
-#include "color_correction_shaders.h"
+#include "shader_programs.h"
 #include <vulkan/vulkan.h>
 #include <algorithm>
 #include <array>
@@ -46,7 +46,7 @@ struct VulkanPass : ShaderPass
     std::array<Slot, 3> slots{};
     std::size_t slot_index = 0;
 
-    explicit VulkanPass(SDL_Renderer* renderer) : renderer(renderer)
+    VulkanPass(SDL_Renderer* renderer, shaders::Effect effect) : ShaderPass(effect), renderer(renderer)
     {
         const auto props = SDL_GetRendererProperties(renderer);
         device = static_cast<VkDevice>(SDL_GetPointerProperty(props, SDL_PROP_RENDERER_VULKAN_DEVICE_POINTER, nullptr));
@@ -144,8 +144,9 @@ struct VulkanPass : ShaderPass
         set_info.bindingCount = 1;
         set_info.pBindings = &binding;
         check(vkCreateDescriptorSetLayout(device, &set_info, nullptr, &bindings));
-        VkPushConstantRange constants{VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-                                      (shaders::parameter_vector_count + 1) * 4 * sizeof(float)};
+        const auto constant_size =
+            static_cast<std::uint32_t>((shaders::parameter_vector_count(effect) + 2) * 4 * sizeof(float));
+        VkPushConstantRange constants{VK_SHADER_STAGE_FRAGMENT_BIT, 0, constant_size};
         VkPipelineLayoutCreateInfo layout_info{};
         layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         layout_info.setLayoutCount = 1;
@@ -185,17 +186,18 @@ struct VulkanPass : ShaderPass
         {
             VkShaderModuleCreateInfo info{};
             info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-            info.codeSize = sizeof(code);
-            info.pCode = code;
+            info.codeSize = code.size_bytes();
+            info.pCode = code.data();
             VkShaderModule result;
             check(vkCreateShaderModule(device, &info, nullptr, &result));
             return result;
         };
-        const auto vertex = module(color_vert);
+        const auto& code = shaders::program(effect);
+        const auto vertex = module(code.vertex);
         VkShaderModule fragment = VK_NULL_HANDLE;
         try
         {
-            fragment = module(color_frag);
+            fragment = module(code.fragment);
             std::array<VkPipelineShaderStageCreateInfo, 2> stages{};
             for (auto& stage : stages)
             {
@@ -373,7 +375,7 @@ struct VulkanPass : ShaderPass
         SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_NONE);
     }
     SDL_Texture* draw(SDL_Texture* input, unsigned frame_width, unsigned frame_height,
-                      const shaders::Shader& settings) override
+                      const shaders::Shader& settings, unsigned frame_count) override
     {
         if (!SDL_FlushRenderer(renderer))
         {
@@ -437,12 +439,16 @@ struct VulkanPass : ShaderPass
         float input_width, input_height;
         SDL_GetTextureSize(input, &input_width, &input_height);
         const auto values = shaders::uniform_values(settings);
-        std::array<float, (shaders::parameter_vector_count + 1) * 4> parameters{};
-        std::copy(values.begin(), values.end(), parameters.begin());
-        parameters[values.size()] = width / input_width;
-        parameters[values.size() + 1] = height / input_height;
-        vkCmdPushConstants(slot.command, layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(parameters),
-                           parameters.data());
+        const auto size = shaders::parameter_vector_count(effect) * 4;
+        std::array<float, (shaders::maximum_parameter_vectors + 2) * 4> parameters{};
+        std::copy_n(values.begin(), size, parameters.begin());
+        parameters[size] = width / input_width;
+        parameters[size + 1] = height / input_height;
+        parameters[size + 2] = 0.5f / width;
+        parameters[size + 3] = 0.5f / height;
+        parameters[size + 4] = float(frame_count % 65536);
+        vkCmdPushConstants(slot.command, layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                           static_cast<std::uint32_t>((size + 8) * sizeof(float)), parameters.data());
         vkCmdDraw(slot.command, 3, 1, 0, 0);
         vkCmdEndRenderPass(slot.command);
         check(vkEndCommandBuffer(slot.command));
@@ -457,7 +463,7 @@ struct VulkanPass : ShaderPass
 };
 } // namespace
 
-std::unique_ptr<ShaderPass> create_vulkan_shader_pass(SDL_Renderer* renderer)
+std::unique_ptr<ShaderPass> create_vulkan_shader_pass(SDL_Renderer* renderer, shaders::Effect effect)
 {
-    return std::make_unique<VulkanPass>(renderer);
+    return std::make_unique<VulkanPass>(renderer, effect);
 }

@@ -1,5 +1,5 @@
 #include "shader_pass.h"
-#include "color_correction_shaders.h"
+#include "shader_programs.h"
 #include <SDL3/SDL_opengl.h>
 #include <array>
 #include <stdexcept>
@@ -62,7 +62,7 @@ struct GlPass : ShaderPass
     SDL_GLContext context;
     bool es;
     GLuint program = 0, buffer = 0, framebuffer = 0, output = 0;
-    GLint frame_uniform = -1, values_uniform = -1, source_uniform = -1;
+    GLint frame_uniform = -1, values_uniform = -1, source_uniform = -1, context_uniform = -1;
     SDL_Texture* texture = nullptr;
     unsigned width = 0, height = 0;
 
@@ -78,8 +78,8 @@ struct GlPass : ShaderPass
             throw std::runtime_error(std::string("Missing shader function: ") + name);
         }
     }
-    explicit GlPass(SDL_Renderer* renderer)
-        : renderer(renderer), window(SDL_GL_GetCurrentWindow()), context(SDL_GL_GetCurrentContext()),
+    GlPass(SDL_Renderer* renderer, shaders::Effect effect)
+        : ShaderPass(effect), renderer(renderer), window(SDL_GL_GetCurrentWindow()), context(SDL_GL_GetCurrentContext()),
           es(std::string_view(SDL_GetRendererName(renderer)) == "opengles2")
     {
 #define LOAD(member, function) load(member, "gl" #function)
@@ -177,7 +177,7 @@ struct GlPass : ShaderPass
             std::array<char, 2048> log{};
             get_shader_log(shader, log.size(), nullptr, log.data());
             delete_shader(shader);
-            throw std::runtime_error(std::string("Color correction shader: ") + log.data());
+            throw std::runtime_error(std::string(shaders::name(effect)) + " shader: " + log.data());
         }
         return shader;
     }
@@ -187,11 +187,12 @@ struct GlPass : ShaderPass
         {
             return;
         }
-        const auto vertex = compile(GL_VERTEX_SHADER, color_gl_vertex);
+        const auto& code = shaders::program(effect);
+        const auto vertex = compile(GL_VERTEX_SHADER, code.gl_vertex);
         GLuint fragment = 0;
         try
         {
-            fragment = compile(GL_FRAGMENT_SHADER, color_gl_fragment);
+            fragment = compile(GL_FRAGMENT_SHADER, code.gl_fragment);
         }
         catch (...)
         {
@@ -211,13 +212,14 @@ struct GlPass : ShaderPass
         {
             std::array<char, 2048> log{};
             get_program_log(program, log.size(), nullptr, log.data());
-            throw std::runtime_error(std::string("Color correction program: ") + log.data());
+            throw std::runtime_error(std::string(shaders::name(effect)) + " program: " + log.data());
         }
         gen_buffers(1, &buffer);
         gen_framebuffers(1, &framebuffer);
         frame_uniform = uniform_location(program, "frame");
         values_uniform = uniform_location(program, "values[0]");
         source_uniform = uniform_location(program, "source");
+        context_uniform = uniform_location(program, "context");
         GLint previous_buffer;
         get_integer(GL_ARRAY_BUFFER_BINDING, &previous_buffer);
         constexpr std::array<float, 6> vertices{-1, -1, 3, -1, -1, 3};
@@ -226,7 +228,7 @@ struct GlPass : ShaderPass
         bind_buffer(GL_ARRAY_BUFFER, previous_buffer);
     }
     SDL_Texture* draw(SDL_Texture* input, unsigned frame_width, unsigned frame_height,
-                      const shaders::Shader& settings) override
+                      const shaders::Shader& settings, unsigned frame_count) override
     {
         if (!SDL_FlushRenderer(renderer))
         {
@@ -339,10 +341,12 @@ struct GlPass : ShaderPass
             const auto values = shaders::uniform_values(settings);
             float input_width, input_height;
             SDL_GetTextureSize(input, &input_width, &input_height);
-            const std::array<float, 4> source{width / input_width, height / input_height, 0, 0};
+            const std::array<float, 4> source{width / input_width, height / input_height, 0.5f / width, 0.5f / height};
+            const std::array<float, 4> context{float(frame_count % 65536), 0, 0, 0};
             uniform_1i(frame_uniform, 0);
-            uniform_4fv(values_uniform, shaders::parameter_vector_count, values.data());
+            uniform_4fv(values_uniform, static_cast<GLsizei>(shaders::parameter_vector_count(effect)), values.data());
             uniform_4fv(source_uniform, 1, source.data());
+            uniform_4fv(context_uniform, 1, context.data());
             bind_buffer(GL_ARRAY_BUFFER, buffer);
             attribute_pointer(0, 2, GL_FLOAT, GL_FALSE, 0, nullptr);
             enable_attribute(0);
@@ -359,11 +363,11 @@ struct GlPass : ShaderPass
 };
 } // namespace
 
-std::unique_ptr<ShaderPass> create_gl_shader_pass(SDL_Renderer* renderer)
+std::unique_ptr<ShaderPass> create_gl_shader_pass(SDL_Renderer* renderer, shaders::Effect effect)
 {
     if (!SDL_FlushRenderer(renderer))
     {
         throw std::runtime_error(SDL_GetError());
     }
-    return std::make_unique<GlPass>(renderer);
+    return std::make_unique<GlPass>(renderer, effect);
 }

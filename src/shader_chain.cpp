@@ -9,6 +9,7 @@ struct ShaderChain::Impl
     SDL_Texture* normalized = nullptr;
     unsigned width = 0, height = 0;
     std::vector<std::unique_ptr<ShaderPass>> passes;
+    unsigned frame_count = 0;
     ~Impl()
     {
         passes.clear();
@@ -98,6 +99,7 @@ SDL_Texture* ShaderChain::draw(SDL_Renderer* renderer, SDL_Texture* input, unsig
         input = state.normalized;
     }
     std::size_t pass = 0;
+    const unsigned frame_count = state.frame_count++;
     for (const auto& shader : settings.effects)
     {
         if (!shader.enabled)
@@ -106,9 +108,14 @@ SDL_Texture* ShaderChain::draw(SDL_Renderer* renderer, SDL_Texture* input, unsig
         }
         if (pass == state.passes.size())
         {
-            state.passes.push_back(vulkan ? create_vulkan_shader_pass(renderer) : create_gl_shader_pass(renderer));
+            state.passes.push_back(nullptr);
         }
-        input = state.passes[pass++]->draw(input, width, height, shader);
+        if (!state.passes[pass] || state.passes[pass]->effect != shader.effect)
+        {
+            state.passes[pass] = vulkan ? create_vulkan_shader_pass(renderer, shader.effect)
+                                      : create_gl_shader_pass(renderer, shader.effect);
+        }
+        input = state.passes[pass++]->draw(input, width, height, shader, frame_count);
     }
     state.passes.resize(pass);
     return input;

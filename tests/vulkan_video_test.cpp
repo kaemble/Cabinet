@@ -94,6 +94,7 @@ int main(int argc, char**) {
             auto renderer = video.create_renderer(window, argc > 1);
             ShaderChain shader_chain;
             shaders::Stack shader_settings;
+            shader_settings.effects = {shaders::Shader(shaders::Effect::ColorCorrection)};
             shader_settings.effects[0].enabled = true;
             SecondaryWindow bottom;
             bottom.create(window, renderer, nullptr, &video, "Vulkan screens", 320, 240);

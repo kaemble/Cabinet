@@ -2,7 +2,7 @@
 
 ## Local development
 
-Python 3.12+, CMake 3.20+, a C++20 compiler, and the development packages for FreeType, Vulkan, LibArchive, SQLite, JPEG, libcurl, nlohmann_json, and OpenSSL Crypto are needed. Optional Armada support (`-DCABINET_ARMADA_DRM=ON`) also needs libdrm, GBM, EGL, Wayland, wayland-scanner, and wayland-protocols. Install SDL's platform development dependencies as well if its X11/Wayland/audio backends are wanted. Git is also needed by the core-bundle tests.
+Python 3.12+, CMake 3.20+, a C++20 compiler, `glslangValidator` (`glslang-tools` on Debian), and the development packages for FreeType, Vulkan, LibArchive, SQLite, JPEG, libcurl, nlohmann_json, and OpenSSL Crypto are needed. Optional Armada support (`-DCABINET_ARMADA_DRM=ON`) also needs libdrm, GBM, EGL, Wayland, wayland-scanner, and wayland-protocols. Install SDL's platform development dependencies as well if its X11/Wayland/audio backends are wanted. Git is also needed by the core-bundle tests.
 
 ```sh
 python3 tools/build_sdl.py --jobs 6
@@ -23,7 +23,7 @@ When replacing an SDL package already cached by an existing build, add `-USDL3_D
 
 The helper verifies the downloaded archive, caches its source and build files under `build/sdl-work/`, disables SDL's shared library and test/example targets, and installs the static library plus its CMake package and license. SDL's native platform backends remain enabled when their development dependencies are present; their optional system libraries are loaded dynamically (`SDL_DEPS_SHARED=ON`). Use `--archive PATH` to point to an offline copy of the same checksum-pinned archive and `--work-dir` to change the cache location.
 
-The helper also accepts `--toolchain cmake/toolchains/linux-aarch64.cmake` and a separate `--prefix build/sdl3-static-aarch64`. Configure Cabinet with that same toolchain and prefix. Cross builds still require the target development libraries and a suitable sysroot; an x86 SDL prefix cannot serve an aarch64 build.
+The helper also accepts `--toolchain cmake/toolchains/linux-aarch64.cmake` and a separate `--prefix build/sdl3-static-aarch64`. Configure Cabinet with that same toolchain and prefix. Cross builds use host Python and `glslangValidator` to generate shader headers, and require the target development libraries and a suitable sysroot; an x86 SDL prefix cannot serve an aarch64 build.
 
 ## Running and installation
 
@@ -47,7 +47,7 @@ cmake --build build/runner-only
 cmake --install build/runner-only --prefix /path/to/install
 ```
 
-This build needs static SDL3, FreeType, and Vulkan, but does not discover or require SQLite, LibArchive, OpenSSL Crypto, or a core bundle. It installs `cabinet-runner` and licenses. Supply a compatible core separately.
+This build needs Python 3.12+, the host `glslangValidator`, static SDL3, FreeType, and Vulkan, but does not discover or require SQLite, LibArchive, OpenSSL Crypto, or a core bundle. It installs `cabinet-runner` and licenses. Supply a compatible core separately.
 
 ## SDL and Linux runtime baseline
 

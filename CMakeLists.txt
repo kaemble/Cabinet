@@ -10,6 +10,8 @@ find_package(SDL3 ${CABINET_SDL_VERSION} EXACT REQUIRED CONFIG COMPONENTS SDL3-s
 message(STATUS "Cabinet SDL: ${SDL3_VERSION} (static)")
 find_package(Freetype REQUIRED)
 find_package(Vulkan REQUIRED)
+find_package(Python3 3.12 REQUIRED COMPONENTS Interpreter)
+find_program(CABINET_GLSLANG_VALIDATOR NAMES glslangValidator REQUIRED NO_CMAKE_FIND_ROOT_PATH)
 
 # Convert assets only when their inputs change, rather than on every configure.
 file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/generated")
@@ -38,9 +40,43 @@ target_compile_features(cabinet_text PUBLIC cxx_std_20)
 target_include_directories(cabinet_text PUBLIC src)
 target_link_libraries(cabinet_text PUBLIC SDL3::SDL3-static Freetype::Freetype)
 install(FILES assets/fonts/OFL.txt DESTINATION ${CMAKE_INSTALL_DATADIR}/cabinet/fonts)
-install(FILES third_party/SDL-LICENSE.txt DESTINATION ${CMAKE_INSTALL_DATADIR}/cabinet/licenses)
+install(FILES third_party/SDL-LICENSE.txt third_party/film-noise-LICENSE.txt
+  DESTINATION ${CMAKE_INSTALL_DATADIR}/cabinet/licenses)
+
+set(CABINET_SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/shaders")
+file(GLOB CABINET_EFFECT_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/effects/*.glsl")
+set(CABINET_EFFECT_HEADERS
+  "${CABINET_SHADER_OUTPUT_DIR}/shader_definitions.h"
+  "${CABINET_SHADER_OUTPUT_DIR}/shader_programs.h")
+foreach(EFFECT_FILE IN LISTS CABINET_EFFECT_FILES)
+  get_filename_component(EFFECT_NAME "${EFFECT_FILE}" NAME_WE)
+  list(APPEND CABINET_EFFECT_HEADERS "${CABINET_SHADER_OUTPUT_DIR}/${EFFECT_NAME}_shaders.h")
+endforeach()
+set(CABINET_EFFECT_MANIFEST "${CMAKE_CURRENT_BINARY_DIR}/generated/shader_inputs.cmake")
+file(CONFIGURE OUTPUT "${CABINET_EFFECT_MANIFEST}"
+  CONTENT "set(CABINET_EFFECT_FILES [==[${CABINET_EFFECT_FILES}]==])\n" @ONLY)
+add_custom_command(OUTPUT ${CABINET_EFFECT_HEADERS}
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/build_shaders.py"
+    --output-dir "${CABINET_SHADER_OUTPUT_DIR}" --group effects --glslang "${CABINET_GLSLANG_VALIDATOR}"
+  DEPENDS ${CABINET_EFFECT_FILES} "${CABINET_EFFECT_MANIFEST}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/build_shaders.py" "${CABINET_GLSLANG_VALIDATOR}"
+  COMMENT "Compiling configurable shaders" VERBATIM)
+set(CABINET_INTERNAL_HEADERS
+  "${CABINET_SHADER_OUTPUT_DIR}/armada_display_shaders.h"
+  "${CABINET_SHADER_OUTPUT_DIR}/vulkan_snapshot_shader.h")
+add_custom_command(OUTPUT ${CABINET_INTERNAL_HEADERS}
+  COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tools/build_shaders.py"
+    --output-dir "${CABINET_SHADER_OUTPUT_DIR}" --group internal --glslang "${CABINET_GLSLANG_VALIDATOR}"
+  DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/internal/armada_display.vert"
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/internal/armada_display.frag"
+    "${CMAKE_CURRENT_SOURCE_DIR}/assets/shaders/internal/vulkan_snapshot.comp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/build_shaders.py" "${CABINET_GLSLANG_VALIDATOR}"
+  COMMENT "Compiling internal shaders" VERBATIM)
+add_custom_target(cabinet-shaders DEPENDS ${CABINET_EFFECT_HEADERS} ${CABINET_INTERNAL_HEADERS})
 
 add_library(cabinet_runner_core STATIC src/runner.cpp src/async_audio.cpp src/runahead.cpp src/runner_diagnostics.cpp src/runner_pacing.cpp src/game_presentation.cpp src/shader_chain.cpp src/shader_gl.cpp src/shader_vulkan.cpp src/secondary_window.cpp src/core_options.cpp src/settings_store.cpp src/input_router.cpp src/libretro_core.cpp src/audio_output.cpp src/save_manager.cpp src/runner_options.cpp src/frontend.cpp src/hardware_video.cpp src/vulkan_video.cpp src/input_bindings.cpp)
+add_dependencies(cabinet_runner_core cabinet-shaders)
+target_include_directories(cabinet_runner_core PUBLIC "${CABINET_SHADER_OUTPUT_DIR}")
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/third_party/core-info.json" CABINET_CORE_INFO)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/core-info.json")
 string(JSON CABINET_CORE_INFO_COUNT LENGTH "${CABINET_CORE_INFO}" cores)
@@ -108,7 +144,6 @@ if(CABINET_BUILD_HOME)
     message(FATAL_ERROR "No locked core recipes for ${CMAKE_SYSTEM_PROCESSOR}")
   endif()
   set(CABINET_LOCKED_CORES_DIR "${CMAKE_CURRENT_SOURCE_DIR}/build/cores/${CABINET_CORE_ARCH}" CACHE PATH "Verified core bundle built by tools/build_cores.py")
-  find_package(Python3 3.12 REQUIRED COMPONENTS Interpreter)
   set(CABINET_CORE_TOOLCHAIN_ARGS)
   if(CMAKE_CROSSCOMPILING)
     if(NOT CMAKE_TOOLCHAIN_FILE)
@@ -263,7 +298,6 @@ if(BUILD_TESTING)
   target_link_libraries(hardware_video_test PRIVATE cabinet_runner_core)
   find_program(CABINET_XVFB Xvfb)
   if(CABINET_XVFB)
-    find_package(Python3 REQUIRED COMPONENTS Interpreter)
     set(CABINET_XVFB_TEST "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_xvfb.py" "${CABINET_XVFB}")
     add_test(NAME hardware_video COMMAND ${CABINET_XVFB_TEST} $<TARGET_FILE:hardware_video_test> "${CMAKE_CURRENT_BINARY_DIR}/test-data/hardware-video")
     add_test(NAME hardware_video_gles2 COMMAND ${CABINET_XVFB_TEST} $<TARGET_FILE:hardware_video_test> "${CMAKE_CURRENT_BINARY_DIR}/test-data/gles2" gles2)
@@ -283,10 +317,8 @@ if(BUILD_TESTING)
   target_link_libraries(frontend_test PRIVATE cabinet_runner_core)
   add_test(NAME controller_and_menu COMMAND frontend_test)
   set_tests_properties(controller_and_menu PROPERTIES ENVIRONMENT "SDL_VIDEODRIVER=dummy;SDL_VIDEO_DRIVER=dummy;SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS=1")
-  find_package(Python3 QUIET COMPONENTS Interpreter)
-  if(Python3_FOUND)
-    add_test(NAME shader_generation COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/build_shaders_test.py")
-  endif()
+  add_test(NAME shader_generation COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/build_shaders_test.py"
+    --generated-dir "${CABINET_SHADER_OUTPUT_DIR}")
   add_executable(shader_test tests/shader_test.cpp)
   target_link_libraries(shader_test PRIVATE cabinet_runner_core)
   add_test(NAME shader_controls COMMAND shader_test)

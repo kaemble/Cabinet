@@ -195,9 +195,12 @@ int main(int argc, char** argv) {
                         get(GL_READ_BUFFER, &value); require(value == GL_NONE, "Read buffer selection changed");
                         proc<decltype(&glDeleteBuffers)>("glDeleteBuffers")(1, &pbo);
                     }
-                    s.frontend.shaders.effects[0].enabled = false;
+                    auto& color = *std::find_if(s.frontend.shaders.effects.begin(), s.frontend.shaders.effects.end(),
+                                               [](const shaders::Shader& shader)
+                                               { return shader.effect == shaders::Effect::ColorCorrection; });
+                    color.enabled = false;
                     verify_pixels(s, flip);
-                    s.frontend.shaders.effects[0].enabled = true;
+                    color.enabled = true;
                     verify_pixels(s, flip);
                     s.frontend.scaling = 2;
                     verify_pixels(s, flip);
