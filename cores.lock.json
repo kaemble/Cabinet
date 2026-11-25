@@ -937,6 +937,13 @@
           "sha256": "bc40651201886d3e126a8fff33163076e65918d422ce1f18749362984a8ce01d",
           "source_directory": "bzip2-6a8690fc8d26c815e798c588f796eabe9d684cf0"
         }
+      ],
+      "source_changes": [
+        {
+          "path": "Source/Core/DolphinLibretro/Vulkan.cpp",
+          "before": "    pSurfaceCapabilities->currentExtent.width = initInfo.width;\n    pSurfaceCapabilities->currentExtent.height = initInfo.height;\n",
+          "after": "    // These images are offscreen; fixed window bounds must not clamp their resolution.\n    VkPhysicalDeviceProperties properties;\n    vkGetPhysicalDeviceProperties(physicalDevice, &properties);\n    pSurfaceCapabilities->minImageExtent = {1, 1};\n    pSurfaceCapabilities->maxImageExtent = {properties.limits.maxImageDimension2D,\n                                           properties.limits.maxImageDimension2D};\n    pSurfaceCapabilities->currentExtent = {initInfo.width, initInfo.height};\n"
+        }
       ]
     },
     "swanstation": {

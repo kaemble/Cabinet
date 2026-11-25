@@ -75,6 +75,10 @@ def load_lock(path):
                 raise ValueError(f"Invalid {field}: {name}")
         if "architectures" in core and set(core["architectures"]) != set(MACHINES):
             raise ValueError(f"Missing architecture recipe: {name}")
+        for change in core.get("source_changes", []):
+            if (not relative_path(change["path"]) or not isinstance(change["before"], str) or
+                    not change["before"] or not isinstance(change["after"], str)):
+                raise ValueError(f"Invalid source change: {name}")
         paths = set()
         for dependency in core.get("submodules", []):
             check_source(dependency)
@@ -204,6 +208,17 @@ def copy_notices(source, destination):
             shutil.copy2(path, target)
 
 
+def apply_source_changes(source, core):
+    for change in core.get("source_changes", []):
+        path = source / change["path"]
+        if not path.resolve().is_relative_to(source.resolve()):
+            raise ValueError(f"Source change escapes the core: {change['path']}")
+        text = path.read_text()
+        if text.count(change["before"]) != 1:
+            raise ValueError(f"Source change must match exactly once: {change['path']}")
+        path.write_text(text.replace(change["before"], change["after"], 1))
+
+
 def build_core(name, core, arch, toolchain, compilers, cache, temporary, stage, jobs, offline):
     print(f"Building {name} for {arch}", flush=True)
     source = temporary / name / core["source_directory"]
@@ -215,7 +230,8 @@ def build_core(name, core, arch, toolchain, compilers, cache, temporary, stage, 
             target = source / pin["path"]
             target.mkdir(parents=True, exist_ok=True)
             shutil.copytree(extracted, target, dirs_exist_ok=True, symlinks=True)
-        ready.write_text("Verified sources extracted\n")
+        apply_source_changes(source, core)
+        ready.write_text("Verified sources prepared\n")
     # Azahar's archive builds consume these upstream-supported metadata files.
     # Write them on resumed builds too, before CMake generates the core identity.
     if core.get("archive_git_metadata"):

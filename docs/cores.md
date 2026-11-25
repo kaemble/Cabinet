@@ -8,7 +8,7 @@ Home discovers cores from the installed bundle or its configured development bun
 
 Requires Linux, Python 3.12+, CMake, Make, a C/C++ compiler, pkg-config, and NASM for x86 assembly. Azahar requires CMake 3.25+. Hardware cores also need target OpenGL/EGL/GLX and other system development libraries; the [CI workflow](../.github/workflows/cores.yml) lists native build packages. The [Debian build environment](building.md#debian-13-builds-with-docker) supplies a consistent release baseline.
 
-Core dependencies and required submodules are pinned individually. Recipes use bundled static utility libraries where available, while runtime graphics/device interfaces remain system dependencies. PPSSPP uses its pinned FFmpeg archives for x86_64 and aarch64. No upstream source patches are applied.
+Core dependencies and required submodules are pinned individually. Recipes use bundled static utility libraries where available, while runtime graphics/device interfaces remain system dependencies. PPSSPP uses its pinned FFmpeg archives for x86_64 and aarch64. Pinned `source_changes` in a recipe apply exact, single-match replacements to verified sources before configuration. They are included in the recipe hash and applied once when preparing a fresh build tree. Dolphin’s Vulkan offscreen surface limits are corrected this way so fixed Wayland window dimensions do not force the core to pre-scale the image.
 
 ## Native and cross builds
 

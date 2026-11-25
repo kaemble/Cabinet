@@ -21,6 +21,100 @@ spec.loader.exec_module(cores)
 
 
 class BundleTests(unittest.TestCase):
+    def test_dolphin_offscreen_extent_ignores_fixed_window_bounds(self):
+        recipe = cores.load_lock(ROOT / "cores.lock.json")["cores"]["dolphin"]
+        change = recipe["source_changes"][0]
+        with tempfile.TemporaryDirectory(prefix="cabinet-dolphin-extent-") as directory:
+            source = Path(directory)
+            path = source / change["path"]
+            path.parent.mkdir(parents=True)
+            path.write_text('''#include <vulkan/vulkan.h>
+#include <algorithm>
+static bool succeeds = true;
+static unsigned property_queries = 0;
+extern "C" VKAPI_ATTR void VKAPI_CALL vkGetPhysicalDeviceProperties(VkPhysicalDevice, VkPhysicalDeviceProperties* properties)
+{
+    ++property_queries;
+    properties->limits.maxImageDimension2D = 16384;
+}
+static VkResult capabilities(VkPhysicalDevice, VkSurfaceKHR, VkSurfaceCapabilitiesKHR* caps)
+{
+    if (!succeeds) return VK_ERROR_SURFACE_LOST_KHR;
+    caps->currentExtent = caps->minImageExtent = caps->maxImageExtent = {1920, 1080};
+    caps->minImageCount = 2;
+    return VK_SUCCESS;
+}
+static auto vkGetPhysicalDeviceSurfaceCapabilitiesKHR_org = capabilities;
+static struct { unsigned width = 640, height = 528; } initInfo;
+namespace offscreen
+{
+static VkResult surface(VkPhysicalDevice physicalDevice, VkSurfaceKHR native_surface,
+                        VkSurfaceCapabilitiesKHR* pSurfaceCapabilities)
+{
+  VkResult res = vkGetPhysicalDeviceSurfaceCapabilitiesKHR_org(physicalDevice, native_surface, pSurfaceCapabilities);
+  if (res == VK_SUCCESS)
+  {
+''' + change["before"] + '''  }
+  return res;
+}
+}
+extern "C" int check_extent(unsigned width, unsigned height)
+{
+    initInfo.width = width;
+    initInfo.height = height;
+    VkSurfaceCapabilitiesKHR caps{};
+    if (offscreen::surface({}, {}, &caps) != VK_SUCCESS) return 0;
+    return caps.currentExtent.width == width && caps.currentExtent.height == height &&
+        std::clamp(width, caps.minImageExtent.width, caps.maxImageExtent.width) == width &&
+        std::clamp(height, caps.minImageExtent.height, caps.maxImageExtent.height) == height &&
+        caps.maxImageExtent.width == 16384 && caps.maxImageExtent.height == 16384 && caps.minImageCount == 2;
+}
+extern "C" int check_failure()
+{
+    succeeds = false;
+    const auto before = property_queries;
+    VkSurfaceCapabilitiesKHR caps{};
+    return offscreen::surface({}, {}, &caps) == VK_ERROR_SURFACE_LOST_KHR && property_queries == before;
+}
+''')
+            original = source / "original.so"
+            cores.run(["c++", "-std=c++20", "-shared", "-fPIC", path, "-o", original], source)
+            uncorrected = ctypes.CDLL(str(original))
+            self.assertEqual(uncorrected.check_extent(640, 528), 0)
+            cores.apply_source_changes(source, recipe)
+            library = source / "extent.so"
+            cores.run(["c++", "-std=c++20", "-shared", "-fPIC", path, "-o", library], source)
+            probe = ctypes.CDLL(str(library))
+            probe.check_extent.argtypes = [ctypes.c_uint, ctypes.c_uint]
+            for width, height in ((640, 528), (640, 480), (1280, 960), (2560, 2112), (1, 1)):
+                self.assertEqual(probe.check_extent(width, height), 1)
+            self.assertEqual(probe.check_failure(), 1)
+            with self.assertRaisesRegex(ValueError, "match exactly once"):
+                cores.apply_source_changes(source, recipe)
+
+    def test_source_changes_are_pinned_and_only_applied_during_preparation(self):
+        recipe = copy.deepcopy(cores.load_lock(ROOT / "cores.lock.json")["cores"]["dolphin"])
+        before = cores.recipe_digest(recipe)
+        recipe["source_changes"][0]["after"] += "// modified fix\n"
+        self.assertNotEqual(cores.recipe_digest(recipe), before)
+        with tempfile.TemporaryDirectory(prefix="cabinet-source-change-") as directory:
+            root = Path(directory)
+            source = root / "probe/source"
+            source.mkdir(parents=True)
+            (source / "input.cpp").write_text("original\n")
+            recipe.update(source_directory="source", cmake={}, target="probe", artifact="probe.so",
+                          source_changes=[{"path": "input.cpp", "before": "original\n", "after": "corrected\n"}])
+            recipe.pop("submodules", None)
+            with mock.patch.object(cores, "extract_source", return_value=source), mock.patch.object(cores, "run", side_effect=RuntimeError("stop before compile")):
+                for attempt in range(2):
+                    with self.assertRaisesRegex(RuntimeError, "stop before compile"):
+                        cores.build_core("probe", recipe, "x86_64", None, {}, root / "cache", root, root / "stage", 1, True)
+                    self.assertEqual((source / "input.cpp").read_text(), "corrected\n")
+            (source / "input.cpp").write_text("original original\n")
+            with self.assertRaisesRegex(ValueError, "match exactly once"):
+                cores.apply_source_changes(source, dict(source_changes=[{"path": "input.cpp", "before": "original", "after": "fixed"}]))
+
+
     @unittest.skipUnless(shutil.which("aarch64-linux-gnu-gcc"), "requires the aarch64 cross compiler")
     def test_armada_toolchain_optimizes_cmake_and_make_cores(self):
         toolchain = ROOT / "packaging/debian/armadaos.cmake"
