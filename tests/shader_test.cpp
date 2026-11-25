@@ -27,9 +27,8 @@ static void key(Frontend& ui, SDL_Scancode code)
 static shaders::Stack test_stack()
 {
     shaders::Stack result;
-    const auto color = std::find_if(result.effects.begin(), result.effects.end(), [](const shaders::Shader& shader)
-                                    { return shader.effect == shaders::Effect::ColorCorrection; });
-    std::rotate(result.effects.begin(), color, result.effects.end());
+    result.effects = {shaders::Shader(shaders::Effect::ColorCorrection), shaders::Shader(shaders::Effect::FilmNoise),
+                      shaders::Shader(shaders::Effect::ChromaticAberration), shaders::Shader(shaders::Effect::Vignette)};
     return result;
 }
 
@@ -118,9 +117,11 @@ static void controls()
     snapshot.values.shaders.effects[0].enabled = true;
     snapshot.values.shaders.effects[0].parameters = {15, 120, 80, 150, 110, 95, 105};
     snapshot.values.shaders.effects[1].enabled = true;
-    snapshot.values.shaders.effects[1].parameters = {7, 0, 1, 0};
+    snapshot.values.shaders.effects[1].parameters = {7, 0, 1};
     snapshot.values.shaders.effects[2].enabled = true;
     snapshot.values.shaders.effects[2].parameters = {10, -10, 20, -20, 30, -30};
+    snapshot.values.shaders.effects[3].enabled = true;
+    snapshot.values.shaders.effects[3].parameters = {65};
     std::swap(snapshot.values.shaders.effects[0], snapshot.values.shaders.effects[1]);
     settings_store::write_game(directory, snapshot);
     RunnerOptions restored;
@@ -190,7 +191,7 @@ static void film_controls()
 {
     Frontend ui;
     ui.shaders = test_stack();
-    require(ui.shaders.effects.size() == 3 && ui.shaders.effects[1].effect == shaders::Effect::FilmNoise,
+    require(ui.shaders.effects.size() == 4 && ui.shaders.effects[1].effect == shaders::Effect::FilmNoise,
             "Film grain is missing from the catalog");
     const auto defaults = ui.shaders.effects[1].parameters;
     ui.page = Page::Shaders;
@@ -209,7 +210,7 @@ static void film_controls()
     ui.selected = 1;
     key(ui, SDL_SCANCODE_RIGHT);
     require(ui.shaders.effects[0].parameters[1] == 1, "Hotspot toggle failed");
-    ui.selected = 4;
+    ui.selected = 3;
     key(ui, SDL_SCANCODE_RETURN);
     require(ui.shaders.effects[0].parameters == defaults, "Restore defaults used the wrong effect");
     key(ui, SDL_SCANCODE_ESCAPE);
@@ -223,10 +224,10 @@ static void film_controls()
 
     shaders::Stack settings;
     const auto before = settings;
-    for (const auto* text : {"\"film_noise\" 1 0", "\"film_noise\" 1 7 1 1 2",
-                             "\"film_noise\" 1 7 1 1 0 unexpected",
-                             "\"film_noise\" 1 7 1 1 0 999999999999999999999999",
-                             "\"film_noise\" 1 17 1 1 1", "\"unknown\" 1 0 0 0"})
+    for (const auto* text : {"\"film_noise\" 1 0", "\"film_noise\" 1 7 1 2",
+                             "\"film_noise\" 1 7 1 0 unexpected",
+                             "\"film_noise\" 1 7 1 0 999999999999999999999999",
+                             "\"film_noise\" 1 17 1 1", "\"unknown\" 1 0 0 0"})
     {
         std::istringstream invalid(text);
         settings.read(invalid);
@@ -250,6 +251,22 @@ static void film_controls()
     key(chromatic, SDL_SCANCODE_RETURN);
     require(chromatic.shaders.effects[0].parameters == chromatic_defaults && !chromatic.shaders.effects[2].enabled,
             "Chromatic defaults affected film grain");
+
+    Frontend vignette;
+    vignette.page = Page::Shaders;
+    vignette.selected = 3;
+    require(vignette.shaders.effects[3].effect == shaders::Effect::Vignette && !vignette.shaders.active(),
+            "Vignette must be a separate disabled effect");
+    key(vignette, SDL_SCANCODE_DELETE);
+    key(vignette, SDL_SCANCODE_RETURN);
+    key(vignette, SDL_SCANCODE_LEFT);
+    require(vignette.shaders.effects[0].parameters == std::vector<int>({95}),
+            "Vignette strength adjustment failed");
+    vignette.selected = 1;
+    key(vignette, SDL_SCANCODE_RETURN);
+    require(vignette.shaders.effects[0].parameters == std::vector<int>({100}) &&
+                !vignette.shaders.effects[3].enabled,
+            "Vignette defaults affected film grain");
 }
 
 static std::array<int, 3> corrected(std::array<int, 3> input, const shaders::Shader& shader)
@@ -412,8 +429,9 @@ static void film_pixels(const char* driver)
         };
         auto& film = stack.effects[1];
         film.enabled = true;
-        film.parameters.assign(4, 0);
+        film.parameters.assign(3, 0);
         auto& chromatic = stack.effects[2];
+        auto& vignette_effect = stack.effects[3];
         const auto neutral = capture();
         for (int y = 0; y < 64; ++y)
         {
@@ -453,11 +471,18 @@ static void film_pixels(const char* driver)
                 "Channel offset sampled outside the cropped frame");
         chromatic.parameters[4] = 0;
         chromatic.enabled = false;
-        film.enabled = true;
         const double distance = std::hypot(10.5 / 64 - .5, 20.5 / 64 - .5);
         const double t = std::clamp((distance - .25) / .5, 0.0, 1.0);
         const double factor = 1 - t * t * (3 - 2 * t);
-        film.parameters[2] = 1;
+        film.enabled = false;
+        vignette_effect.enabled = true;
+        vignette_effect.parameters[0] = 0;
+        require(capture() == neutral, "Zero-strength vignette must preserve the input");
+        vignette_effect.parameters[0] = 50;
+        const auto half_vignette = capture();
+        require(std::abs(half_vignette[sample] - std::round(neutral[sample] * (1 + factor) / 2)) <= 2,
+                "Vignette strength did not scale the falloff");
+        vignette_effect.parameters[0] = 100;
         const auto vignette = capture();
         require(std::abs(vignette[sample] - std::round(neutral[sample] * factor)) <= 2,
                 "Vignette does not match the centered falloff");
@@ -490,34 +515,36 @@ static void film_pixels(const char* driver)
         require(center >= 127 && edge > 0 && edge < center && corner < edge,
                 "Vignette must preserve the center and darken smoothly toward the corners");
         require(SDL_UpdateTexture(input, nullptr, image.data(), 128 * 4), SDL_GetError());
-        film.parameters[2] = 0;
+        vignette_effect.enabled = false;
+        film.enabled = true;
         film.parameters[1] = 1;
         const auto hotspot = capture();
         require(std::abs(hotspot[sample] - std::round(neutral[sample] + factor * .2 * 255)) <= 2,
                 "Hotspot differs from the reference");
         film.parameters[1] = 0;
-        film.parameters[3] = 1;
+        film.parameters[2] = 1;
         chain.reset();
         const auto scratches = capture();
         const auto clear_frame = capture();
         require(scratches != neutral && clear_frame == neutral, "Scratches must be occasional and independently switchable");
-        film.parameters[3] = 0;
-        film.parameters[2] = 1;
+        film.parameters[2] = 0;
+        film.enabled = false;
+        vignette_effect.enabled = true;
         stack.effects[0].enabled = true;
         stack.effects[0].parameters[0] = 20;
         const auto color_first = capture();
         require(std::abs(color_first[sample] - std::round((neutral[sample] + 51) * factor)) <= 2,
-                "Color correction followed by film grain used the wrong program");
-        std::swap(stack.effects[0], stack.effects[1]);
-        const auto film_first = capture();
-        require(std::abs(film_first[sample] - (std::round(neutral[sample] * factor) + 51)) <= 2 &&
-                    film_first != color_first,
+                "Color correction followed by vignette used the wrong program");
+        std::swap(stack.effects[0], stack.effects[3]);
+        const auto vignette_first = capture();
+        require(std::abs(vignette_first[sample] - (std::round(neutral[sample] * factor) + 51)) <= 2 &&
+                    vignette_first != color_first,
                 "Reordering different effects did not rebuild their programs");
         stack.effects[0].enabled = false;
         const auto color_only = capture();
         require(std::abs(color_only[sample] - (neutral[sample] + 51)) <= 1,
-                "Replacing a film pass with color correction used a stale program");
-        stack.effects[1].enabled = false;
+                "Replacing a vignette pass with color correction used a stale program");
+        stack.effects[3].enabled = false;
         require(chain.draw(renderer, input, 64, 64, stack) == input && !chain.allocated(),
                 "Disabling the mixed stack retained resources");
         SDL_DestroyTexture(input);

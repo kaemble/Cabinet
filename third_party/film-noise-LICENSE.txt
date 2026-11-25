@@ -3,5 +3,5 @@ by hunterk
 license: public domain
 
 Replaces the noise1 texture with procedural scratches and dust,
-centers the vignette/hotspot, and moves RGB offsets into a separate chromatic
-aberration effect with independent per-channel sampling.
+centers the vignette/hotspot, and separates vignette and chromatic aberration
+into independent effects with per-channel RGB offsets.

@@ -80,7 +80,7 @@ class ShaderMetadataTest(unittest.TestCase):
         metadata = [entry for entry, _ in catalog]
         self.assertEqual(build.definition(metadata), (generated_dir / "shader_definitions.h").read_text())
         self.assertEqual(build.programs(metadata), (generated_dir / "shader_programs.h").read_text())
-        self.assertEqual([entry["id"] for entry in metadata], ["chromatic_aberration", "color_correction", "film_noise"])
+        self.assertEqual([entry["id"] for entry in metadata], ["chromatic_aberration", "color_correction", "film_noise", "vignette"])
 
     def test_generated_gl_matches_shaders(self):
         for metadata, body in build.load_catalog(ROOT):

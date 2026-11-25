@@ -28,17 +28,6 @@
 //       "suffix": ""
 //     },
 //     {
-//       "symbol": "vignette",
-//       "name": "Vignette",
-//       "description": "Darken the image toward the edges",
-//       "minimum": 0,
-//       "maximum": 1,
-//       "step": 1,
-//       "initial": 0,
-//       "scale": 1,
-//       "suffix": ""
-//     },
-//     {
 //       "symbol": "noise_toggle",
 //       "name": "Film scratches",
 //       "description": "Occasional procedural scratches and dust",
@@ -67,13 +56,12 @@ float film_hash(float value)
 }
 
 vec3 film_noise(vec3 color, vec2 position, float frame_count,
-                float grain_str, float hotspot, float vignette, float noise_toggle)
+                float grain_str, float hotspot, float noise_toggle)
 {
     vec3 film = color + film_grain(position, grain_str, frame_count);
 
-    float vig = smoothstep(0.25, 0.75, length(position - vec2(0.5)));
-    film *= (vignette > 0.5) ? (1.0 - vig) : 1.0;
-    film += (1.0 - vig) * 0.2 * hotspot;
+    float hotspot_mask = 1.0 - smoothstep(0.25, 0.75, length(position - vec2(0.5)));
+    film += hotspot_mask * 0.2 * hotspot;
 
     float event = film_hash(frame_count);
     if (noise_toggle > 0.5 && (event > 0.99 || event < 0.01))
