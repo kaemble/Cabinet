@@ -1924,7 +1924,7 @@ void Frontend::draw(SDL_Renderer* renderer, TextRenderer& font, int width, int h
         {
             description = selected < static_cast<int>(shaders::color_parameters.size())
                               ? shaders::color_parameters[selected].description
-                          : selected == static_cast<int>(shaders::color_parameters.size()) ? "Restore neutral color correction"
+                          : selected == static_cast<int>(shaders::color_parameters.size()) ? "Restore default shader parameters"
                                                                                          : "Return to Shaders";
         }
         else if (page == Page::ShaderParameterValues)

@@ -23,7 +23,11 @@ North toggles the selected effect; West starts moving it with up/down. West or c
 
 Color correction provides brightness, contrast, saturation, gamma, and red/green/blue gain. Defaults are neutral: brightness 0%, all other parameters 100%. Saturation 0% produces grayscale, and higher gamma brightens midtones. Processing runs at source resolution before the selected scaling mode; menus and text are drawn afterward. OpenGL, GLES2, and Vulkan are supported. With no effects enabled, the existing presentation path runs without shader programs, intermediate effect textures, or effect passes.
 
-The shared GLSL source is in `assets/shaders/color_correction.glsl`. Developers regenerate the embedded GL/GLES source and Vulkan SPIR-V with `python tools/build_shaders.py`, which requires `glslangValidator`. Normal builds and users do not need shader compilation tools or preset files.
+The shared GLSL source and its configuration live together in `assets/shaders/color_correction.glsl`; no new shader format is needed. A JSON header between `// cabinet-shader-begin` and `// cabinet-shader-end`, with each line prefixed by `// `, defines the saved ID, display name, entry function, and ordered parameters. Each parameter declares its symbol, label, description, integer minimum/maximum/step/default (`initial`), and the scale used to convert menu values to shader floats. For example, a scale of `0.01` converts 100% to `1.0`.
+
+The entry function accepts the input RGB color followed by one float per parameter, in header order, and returns RGB. Keep the function arguments in that order when editing parameters. The generator packs values into vec4 uniforms for GL/GLES and matching Vulkan push constants; shaders may define 1–28 parameters. Ranges and defaults must align with their steps. Saved settings remain positional, so keep the ID and parameter order stable to preserve existing configurations; changing parameter count requires a settings migration.
+
+After editing the GLSL file, run `python3 tools/build_shaders.py` (requires `glslangValidator`) and rebuild. The script regenerates both `src/color_correction_definition.h` (menu metadata, defaults, and scaling) and `src/color_correction_shaders.h` (GL/GLES source and Vulkan SPIR-V). Do not edit these generated headers. `shader_settings.h` handles settings state and persistence using the generated metadata. Normal builds and users do not need shader compilation tools or preset files.
 
 ## Hardware rendering
 

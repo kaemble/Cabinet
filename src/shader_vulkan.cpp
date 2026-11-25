@@ -1,6 +1,7 @@
 #include "shader_pass.h"
 #include "color_correction_shaders.h"
 #include <vulkan/vulkan.h>
+#include <algorithm>
 #include <array>
 #include <stdexcept>
 #include <string>
@@ -143,7 +144,8 @@ struct VulkanPass : ShaderPass
         set_info.bindingCount = 1;
         set_info.pBindings = &binding;
         check(vkCreateDescriptorSetLayout(device, &set_info, nullptr, &bindings));
-        VkPushConstantRange constants{VK_SHADER_STAGE_FRAGMENT_BIT, 0, 48};
+        VkPushConstantRange constants{VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                                      (shaders::parameter_vector_count + 1) * 4 * sizeof(float)};
         VkPipelineLayoutCreateInfo layout_info{};
         layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         layout_info.setLayoutCount = 1;
@@ -434,13 +436,11 @@ struct VulkanPass : ShaderPass
         vkCmdSetScissor(slot.command, 0, 1, &scissor);
         float input_width, input_height;
         SDL_GetTextureSize(input, &input_width, &input_height);
-        std::array<float, 12> parameters{};
-        for (int i = 0; i < 7; ++i)
-        {
-            parameters[i] = settings.parameters[i] / 100.f;
-        }
-        parameters[8] = width / input_width;
-        parameters[9] = height / input_height;
+        const auto values = shaders::uniform_values(settings);
+        std::array<float, (shaders::parameter_vector_count + 1) * 4> parameters{};
+        std::copy(values.begin(), values.end(), parameters.begin());
+        parameters[values.size()] = width / input_width;
+        parameters[values.size() + 1] = height / input_height;
         vkCmdPushConstants(slot.command, layout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(parameters),
                            parameters.data());
         vkCmdDraw(slot.command, 3, 1, 0, 0);

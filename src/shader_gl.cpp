@@ -62,7 +62,7 @@ struct GlPass : ShaderPass
     SDL_GLContext context;
     bool es;
     GLuint program = 0, buffer = 0, framebuffer = 0, output = 0;
-    GLint frame_uniform = -1, adjustment_uniform = -1, gain_uniform = -1, source_uniform = -1;
+    GLint frame_uniform = -1, values_uniform = -1, source_uniform = -1;
     SDL_Texture* texture = nullptr;
     unsigned width = 0, height = 0;
 
@@ -216,8 +216,7 @@ struct GlPass : ShaderPass
         gen_buffers(1, &buffer);
         gen_framebuffers(1, &framebuffer);
         frame_uniform = uniform_location(program, "frame");
-        adjustment_uniform = uniform_location(program, "adjustment");
-        gain_uniform = uniform_location(program, "gain");
+        values_uniform = uniform_location(program, "values[0]");
         source_uniform = uniform_location(program, "source");
         GLint previous_buffer;
         get_integer(GL_ARRAY_BUFFER_BINDING, &previous_buffer);
@@ -337,21 +336,12 @@ struct GlPass : ShaderPass
                 0);
             bind_texture(GL_TEXTURE_2D, static_cast<GLuint>(native));
             use_program(program);
-            std::array<float, 4> adjustment{}, gain{1, 1, 1, 0};
-            for (int i = 0; i < 4; ++i)
-            {
-                adjustment[i] = settings.parameters[i] / 100.f;
-            }
-            for (int i = 0; i < 3; ++i)
-            {
-                gain[i] = settings.parameters[i + 4] / 100.f;
-            }
+            const auto values = shaders::uniform_values(settings);
             float input_width, input_height;
             SDL_GetTextureSize(input, &input_width, &input_height);
             const std::array<float, 4> source{width / input_width, height / input_height, 0, 0};
             uniform_1i(frame_uniform, 0);
-            uniform_4fv(adjustment_uniform, 1, adjustment.data());
-            uniform_4fv(gain_uniform, 1, gain.data());
+            uniform_4fv(values_uniform, shaders::parameter_vector_count, values.data());
             uniform_4fv(source_uniform, 1, source.data());
             bind_buffer(GL_ARRAY_BUFFER, buffer);
             attribute_pointer(0, 2, GL_FLOAT, GL_FALSE, 0, nullptr);

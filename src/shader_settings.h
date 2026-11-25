@@ -1,5 +1,6 @@
 #pragma once
 
+#include "color_correction_definition.h"
 #include <algorithm>
 #include <array>
 #include <iomanip>
@@ -14,22 +15,6 @@ enum class Effect
 {
     ColorCorrection
 };
-
-struct Parameter
-{
-    const char* name;
-    const char* description;
-    int minimum, maximum, step, initial;
-};
-
-inline constexpr std::array<Parameter, 7> color_parameters{
-    {{"Brightness", "Add or subtract brightness", -100, 100, 5, 0},
-     {"Contrast", "Adjust contrast around middle gray", 0, 200, 5, 100},
-     {"Saturation", "Adjust color intensity; zero produces grayscale", 0, 200, 5, 100},
-     {"Gamma", "Adjust midtones; higher values brighten the image", 10, 300, 5, 100},
-     {"Red gain", "Adjust the red channel", 0, 200, 5, 100},
-     {"Green gain", "Adjust the green channel", 0, 200, 5, 100},
-     {"Blue gain", "Adjust the blue channel", 0, 200, 5, 100}}};
 
 struct Shader
 {
@@ -47,9 +32,19 @@ struct Shader
     bool operator==(const Shader&) const = default;
 };
 
+inline std::array<float, parameter_vector_count * 4> uniform_values(const Shader& shader)
+{
+    std::array<float, parameter_vector_count * 4> values{};
+    for (std::size_t i = 0; i < shader.parameters.size(); ++i)
+    {
+        values[i] = shader.parameters[i] * color_parameters[i].scale;
+    }
+    return values;
+}
+
 inline const char* name(Effect)
 {
-    return "Color correction";
+    return color_name;
 }
 
 struct Stack
@@ -85,7 +80,7 @@ struct Stack
     {
         for (const auto& shader : effects)
         {
-            out << "shader \"color_correction\" " << shader.enabled;
+            out << "shader " << std::quoted(color_id) << ' ' << shader.enabled;
             for (int value : shader.parameters)
             {
                 out << ' ' << value;
@@ -98,7 +93,7 @@ struct Stack
         std::string id;
         int enabled;
         Shader shader;
-        if (!(in >> std::quoted(id) >> enabled) || id != "color_correction" || (enabled != 0 && enabled != 1))
+        if (!(in >> std::quoted(id) >> enabled) || id != color_id || (enabled != 0 && enabled != 1))
         {
             return;
         }
