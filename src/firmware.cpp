@@ -1,10 +1,123 @@
 #include "firmware.h"
 #include <openssl/evp.h>
+#include <chrono>
+#include <cstdint>
 #include <fstream>
 #include <sstream>
 #include <iomanip>
 #include <stdexcept>
+#include <string_view>
 namespace fs = std::filesystem;
+
+namespace
+{
+std::string ps2_region(const std::vector<unsigned char>& bytes)
+{
+    const auto name = [&](std::size_t entry)
+    {
+        const std::string_view value(reinterpret_cast<const char*>(bytes.data() + entry), 10);
+        return value.substr(0, value.find('\0'));
+    };
+    const auto size = [&](std::size_t entry)
+    {
+        std::uint32_t value = 0;
+        for (unsigned i = 0; i < 4; ++i)
+        {
+            value |= std::uint32_t(bytes[entry + 12 + i]) << (i * 8);
+        }
+        return value;
+    };
+    // Both cores identify PS2 dumps through the aligned ROMDIR and its ROMVER module.
+    for (std::size_t table = 16; table + 32 <= bytes.size(); table += 16)
+    {
+        if (name(table) != "RESET" || ((std::uint64_t(size(table)) + 15) & ~std::uint64_t(15)) != table)
+        {
+            continue;
+        }
+        std::size_t offset = 0, end = bytes.size();
+        bool directory = false;
+        std::string region;
+        for (std::size_t entry = table; entry + 16 <= end; entry += 16)
+        {
+            const auto module = name(entry);
+            if (module.empty())
+            {
+                return directory ? region : std::string{};
+            }
+            const auto length = size(entry);
+            const auto aligned = (std::uint64_t(length) + 15) & ~std::uint64_t(15);
+            if (module.size() == 10 || aligned > bytes.size() - offset)
+            {
+                return {};
+            }
+            if (module == "ROMDIR")
+            {
+                if (offset != table || length < 32 || length % 16)
+                {
+                    return {};
+                }
+                end = table + length;
+                directory = true;
+            }
+            // PS1 compatibility ROMs can carry this PS2-style directory without being a PS2 BIOS.
+            if (module == "EXTINFO" && length >= 31 &&
+                std::string_view(reinterpret_cast<const char*>(bytes.data() + offset + 16), 15) == "20111012-094243")
+            {
+                return {};
+            }
+            if (module == "ROMVER")
+            {
+                if (length < 14)
+                {
+                    return {};
+                }
+                const auto* version = bytes.data() + offset;
+                const auto decimal = [&](unsigned start, unsigned count)
+                {
+                    int value = 0;
+                    for (unsigned i = start; i < start + count; ++i)
+                    {
+                        if (version[i] < '0' || version[i] > '9')
+                        {
+                            return -1;
+                        }
+                        value = value * 10 + version[i] - '0';
+                    }
+                    return value;
+                };
+                const auto year = decimal(6, 4), month = decimal(10, 2), day = decimal(12, 2);
+                if (decimal(0, 4) <= 0 || year < 1990 || month < 1 || day < 1 ||
+                    !std::chrono::year_month_day(std::chrono::year(year), std::chrono::month(month),
+                                                 std::chrono::day(day)).ok() ||
+                    (version[5] != 'C' && version[5] != 'D'))
+                {
+                    return {};
+                }
+                switch (version[4])
+                {
+                case 'J': region = "Japan"; break;
+                case 'A': region = "North America"; break;
+                case 'E': region = "Europe"; break;
+                case 'H': region = "Asia"; break;
+                case 'C': region = "China"; break;
+                case 'T': region = "Development"; break;
+                case 'X': region = "Test"; break;
+                case 'P': region = "Region-free"; break;
+                default: return {};
+                }
+            }
+            offset += static_cast<std::size_t>(aligned);
+        }
+        return {};
+    }
+    return {};
+}
+}
+
+bool requires_bios(const std::string& system)
+{
+    return system == "psx" || system == "ps2" || system == "saturn";
+}
 const std::vector<BiosInfo>& supported_bios()
 {
     // PS1 hashes: SwanStation src/core/bios.cpp. Saturn: Libretro core documentation.
@@ -38,17 +151,27 @@ const std::vector<BiosInfo>& supported_bios()
         {"saturn", "3240872c70984b6cbfda1586cab68dbe", "mpr-17933.bin", "North America / Europe"}};
     return bios;
 }
-const BiosInfo* identify_bios(const std::string& system, const fs::path& file)
+std::optional<BiosInfo> identify_bios(const std::string& system, const fs::path& file)
 {
-    if (!fs::is_regular_file(file) || fs::file_size(file) != 512 * 1024)
+    if (!fs::is_regular_file(file))
     {
-        return nullptr;
+        return std::nullopt;
     }
-    std::vector<unsigned char> bytes(512 * 1024);
+    const auto size = fs::file_size(file);
+    if ((system == "ps2") ? (size < 4 * 1024 * 1024 || size > 8 * 1024 * 1024) : size != 512 * 1024)
+    {
+        return std::nullopt;
+    }
+    std::vector<unsigned char> bytes(size);
     std::ifstream input(file, std::ios::binary);
     if (!input.read(reinterpret_cast<char*>(bytes.data()), bytes.size()))
     {
-        return nullptr;
+        return std::nullopt;
+    }
+    const auto region = system == "ps2" ? ps2_region(bytes) : std::string{};
+    if (system == "ps2" && region.empty())
+    {
+        return std::nullopt;
     }
     unsigned char digest[EVP_MAX_MD_SIZE];
     unsigned length = 0;
@@ -61,22 +184,41 @@ const BiosInfo* identify_bios(const std::string& system, const fs::path& file)
     {
         hash << std::hex << std::setw(2) << std::setfill('0') << static_cast<unsigned>(digest[i]);
     }
+    if (system == "ps2")
+    {
+        return BiosInfo{system, hash.str(), "pcsx2/bios/" + hash.str() + ".bin", region};
+    }
     for (const auto& bios : supported_bios())
     {
         if (bios.system == system && bios.digest == hash.str())
         {
-            return &bios;
+            return bios;
         }
     }
-    return nullptr;
+    return std::nullopt;
 }
 bool has_bios(const std::string& system, const fs::path& directory)
 {
+    if (system == "ps2")
+    {
+        const auto folder = directory / "pcsx2/bios";
+        if (fs::is_directory(folder))
+        {
+            for (const auto& entry : fs::directory_iterator(folder))
+            {
+                if (identify_bios(system, entry.path()))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
     for (const auto& bios : supported_bios())
     {
         if (bios.system == system)
         {
-            const auto* installed = identify_bios(system, directory / bios.filename);
+            const auto installed = identify_bios(system, directory / bios.filename);
             if (installed && (system == "psx" || installed->filename == bios.filename))
             {
                 return true;
@@ -87,28 +229,30 @@ bool has_bios(const std::string& system, const fs::path& directory)
 }
 std::string install_bios(const std::string& system, const fs::path& file, const fs::path& directory)
 {
-    const auto* bios = identify_bios(system, file);
+    const auto bios = identify_bios(system, file);
     if (!bios)
     {
-        throw std::runtime_error("Unrecognized BIOS. Select an unmodified 512 KiB BIOS for this system.");
+        throw std::runtime_error(system == "ps2" ? "Unrecognized BIOS. Select a complete PS2 BIOS dump (4–8 MiB)."
+                                               : "Unrecognized BIOS. Select an unmodified 512 KiB BIOS for this system.");
     }
-    fs::create_directories(directory);
     const auto destination = directory / bios->filename;
-    if (identify_bios(system, destination))
+    fs::create_directories(destination.parent_path());
+    const auto installed = identify_bios(system, destination);
+    if (installed && (system != "ps2" || installed->digest == bios->digest))
     {
         return bios->region + " BIOS already installed";
     }
     const auto temporary = destination.string() + ".tmp";
     // Write the verified bytes again only after confirming the source is unchanged.
     fs::copy_file(file, temporary, fs::copy_options::overwrite_existing);
-    const auto* copied = identify_bios(system, temporary);
+    const auto copied = identify_bios(system, temporary);
     if (!copied || copied->digest != bios->digest)
     {
         fs::remove(temporary);
         throw std::runtime_error("BIOS file changed while copying");
     }
     fs::rename(temporary, destination);
-    if (bios->region == "Region-free")
+    if (system == "psx" && bios->region == "Region-free")
     {
         for (const char* name : {"scph5500.bin", "scph5502.bin"})
         {

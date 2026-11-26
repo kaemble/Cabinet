@@ -26,11 +26,15 @@ RUN rm -f /etc/apt/sources.list.d/debian.sources && \
     libusb-1.0-0-dev:$TARGET_ARCH libevdev-dev:$TARGET_ARCH libpng-dev:$TARGET_ARCH \
     zlib1g-dev:$TARGET_ARCH libbz2-dev:$TARGET_ARCH liblzma-dev:$TARGET_ARCH libzstd-dev:$TARGET_ARCH \
     libcurl4-openssl-dev:$TARGET_ARCH libmbedtls-dev:$TARGET_ARCH \
+    liblz4-dev:$TARGET_ARCH libwebp-dev:$TARGET_ARCH libpcap-dev:$TARGET_ARCH \
+    libdbus-1-dev:$TARGET_ARCH libfontconfig-dev:$TARGET_ARCH \
     libavcodec-dev:$TARGET_ARCH libavformat-dev:$TARGET_ARCH libavutil-dev:$TARGET_ARCH \
     libswresample-dev:$TARGET_ARCH libswscale-dev:$TARGET_ARCH libgl1-mesa-dri:$TARGET_ARCH \
     && rm -rf /var/lib/apt/lists/*
 # SDL's GLES renderer is needed alongside desktop GL on ARM devices.
 RUN apt-get update && apt-get install -y --no-install-recommends libgles-dev:$TARGET_ARCH \
+    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends clang \
     && rm -rf /var/lib/apt/lists/*
 COPY packaging/debian/aarch64.cmake packaging/debian/armadaos.cmake packaging/debian/run-build.py /opt/cabinet/
 RUN printf '%s\n' "$DEBIAN_SNAPSHOT" > /opt/cabinet/debian-snapshot && \

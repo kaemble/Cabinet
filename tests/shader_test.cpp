@@ -1348,7 +1348,8 @@ static void cas_pixels(const char* driver)
 }
 
 static std::array<int, 3> crt_reference(const std::vector<std::array<int, 3>>& input, const std::vector<int>& parameters,
-                                              SDL_Point input_size, SDL_Point output_size, int x, int y)
+                                       SDL_Point input_size, SDL_Point output_size, int x, int y,
+                                       bool alternate_saturation = false)
 {
     const double u = (x + .5) / output_size.x, v = (y + .5) / output_size.y;
     const double ox = parameters[10] / 100.0, oy = parameters[11] / 100.0;
@@ -1434,7 +1435,13 @@ static std::array<int, 3> crt_reference(const std::vector<std::array<int, 3>>& i
         }
         result[channel] = value;
     }
-    const bool dark = std::sqrt(result[0] * result[0] + result[1] * result[1] + result[2] * result[2]) * .5775 < .5;
+    const double brightness = std::sqrt(result[0] * result[0] + result[1] * result[1] + result[2] * result[2]) * .5775;
+    bool dark = brightness < .5;
+    // GPU filtering and math can choose either weighting very near this discontinuity.
+    if (alternate_saturation && std::abs(brightness - .5) < .0001)
+    {
+        dark = !dark;
+    }
     const double gray = dark ? result[0] * .18 + result[1] * .72 + result[2] * .02
                              : result[0] * .3 + result[1] * .6 + result[2] * .1;
     std::array<int, 3> output{};
@@ -1580,16 +1587,27 @@ static void crt_pixels(const char* driver)
                             for (int x = 0; x < output_size.x; ++x)
                             {
                                 const auto expected = crt_reference(image, parameters, {8, 6}, output_size, x, y);
-                                for (int channel = 0; channel < 3; ++channel)
+                                const auto& pixel = actual[y * output_size.x + x];
+                                const auto matches = [&](const std::array<int, 3>& reference)
                                 {
-                                    if (std::abs(actual[y * output_size.x + x][channel] - expected[channel]) > 3)
+                                    for (int channel = 0; channel < 3; ++channel)
                                     {
-                                        std::cerr << driver << " CRT preset " << preset << " input " << value
-                                                  << " flipped " << flipped << " pixel " << x << ',' << y
-                                                  << " channel " << channel << " got " << actual[y * output_size.x + x][channel]
-                                                  << " expected " << expected[channel] << '\n';
-                                        throw std::runtime_error("CRT scanline/mask/gamma output differs from the reference");
+                                        if (std::abs(pixel[channel] - reference[channel]) > 3)
+                                        {
+                                            return false;
+                                        }
                                     }
+                                    return true;
+                                };
+                                if (!matches(expected) &&
+                                    !matches(crt_reference(image, parameters, {8, 6}, output_size, x, y, true)))
+                                {
+                                    std::cerr << driver << " CRT preset " << preset << " input " << value
+                                              << " format " << SDL_GetPixelFormatName(format)
+                                              << " flipped " << flipped << " pixel " << x << ',' << y
+                                              << " got " << pixel[0] << ',' << pixel[1] << ',' << pixel[2]
+                                              << " expected " << expected[0] << ',' << expected[1] << ',' << expected[2] << '\n';
+                                    throw std::runtime_error("CRT scanline/mask/gamma output differs from the reference");
                                 }
                             }
                         }

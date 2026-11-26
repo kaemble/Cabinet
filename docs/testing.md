@@ -8,6 +8,8 @@ ctest --test-dir build --parallel 4 --output-on-failure
 
 The default suite covers CLI validation, library/import flows, input and controller lifecycle, configuration inheritance, save-state failures/rollback, frame pacing, and runner behavior with a synthetic libretro core. The synthetic core is test-only and requires no commercial ROM. Graphics tests use independent Xvfb displays and Mesa software GL when available; test working directories and temporary data are isolated under `build/test-work/`.
 
+`firmware` checks PS2 ROM-directory validation, truncated and malformed dumps, non-console ROM rejection, installation of multiple BIOS regions, deduplication, and detection of manually installed files. The fixtures contain synthetic metadata rather than console firmware. `home_window` covers PS2 BIOS prompting, cancel/skip, file selection, continuing import, reopening setup, and bypassing setup when a BIOS is already installed.
+
 To add real-core launch, save/load, and pause checks with a user-supplied ROM:
 
 ```sh

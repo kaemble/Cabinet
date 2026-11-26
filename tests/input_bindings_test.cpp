@@ -31,7 +31,7 @@ int main(int argc,char** argv) {
         std::array<bool,SDL_SCANCODE_COUNT> keys{};
         auto axis=[&](SDL_GamepadAxis a,int value) { require(SDL_SetJoystickVirtualAxis(joystick,a,a>=SDL_GAMEPAD_AXIS_LEFT_TRIGGER && value==0 ? -32768 : value),SDL_GetError()); SDL_UpdateJoysticks(); SDL_UpdateGamepads(); };
         auto button=[&](SDL_GamepadButton b,bool value) { require(SDL_SetJoystickVirtualButton(joystick,b,value),SDL_GetError()); SDL_UpdateJoysticks(); SDL_UpdateGamepads(); };
-        for (const auto system : {"generic", "3ds", "dc", "gb", "gba", "gc", "gg", "nes", "n64", "nds", "md", "sms", "saturn", "psp", "psx", "snes", "pce"}) {
+        for (const auto system : {"generic", "3ds", "dc", "gb", "gba", "gc", "gg", "nes", "n64", "nds", "md", "sms", "saturn", "psp", "psx", "ps2", "snes", "pce"}) {
             InputBindings defaults; defaults.configure(system, {});
             const auto clicks = defaults.sample(nullptr, keys.data(), SDL_BUTTON_LMASK | SDL_BUTTON_RMASK);
             for (auto pressed : clicks.buttons) require(!pressed, "Non-Wii defaults mapped a mouse click to a game button");
@@ -180,7 +180,7 @@ int main(int argc,char** argv) {
         }
         input.configure("gc",{}); axis(SDL_GAMEPAD_AXIS_LEFT_TRIGGER,20000);
         value=input.sample(pad,keys.data()); require(value.pressure[12]>0 && value.pressure[12]<32767,"GameCube trigger lost analog range"); axis(SDL_GAMEPAD_AXIS_LEFT_TRIGGER,0);
-        for(const char* system : {"3ds","wii","dc","gb","gba","gc","gg","nes","n64","nds","md","sms","saturn","psp","psx","snes","pce","generic"}) {
+        for(const char* system : {"3ds","wii","dc","gb","gba","gc","gg","nes","n64","nds","md","sms","saturn","psp","psx","ps2","snes","pce","generic"}) {
             input.configure(system,{});
             for (const auto& binding : input.rows()) {
                 require(binding.target < 24, "Separate digital stick alias is still exposed");
@@ -251,6 +251,22 @@ int main(int argc,char** argv) {
         require(value.pressure[12]>0 && value.pressure[12]<32767 && value.axes[0]>0 && !value.buttons[7],
             "Dreamcast analog stick/trigger range incorrect");
         axis(SDL_GAMEPAD_AXIS_LEFT_TRIGGER,0); axis(SDL_GAMEPAD_AXIS_LEFTX,0);
+        for (const auto core : {"pcee2_libretro.so", "armsx2_libretro.so"})
+        {
+            require(InputBindings::identify("game.cso", core) == "ps2", "PS2 CSO mistaken for PSP");
+            require(InputBindings::identify("game.iso", core) == "ps2", "PS2 core inference failed");
+        }
+        input.configure("ps2", dir);
+        require(input.rows()[row(input, "Cross")].target == RETRO_DEVICE_ID_JOYPAD_B &&
+                input.rows()[row(input, "Triangle")].target == RETRO_DEVICE_ID_JOYPAD_X,
+                "PS2 face buttons use incorrect RetroPad mapping");
+        axis(SDL_GAMEPAD_AXIS_LEFTX, 24000); axis(SDL_GAMEPAD_AXIS_RIGHTX, 18000);
+        axis(SDL_GAMEPAD_AXIS_LEFT_TRIGGER, 20000);
+        value = input.sample(pad, keys.data());
+        require(value.axes[0] > 0 && value.axes[2] > 0 && !value.buttons[RETRO_DEVICE_ID_JOYPAD_RIGHT] &&
+                value.pressure[RETRO_DEVICE_ID_JOYPAD_L2] > 0,
+                "PS2 analog sticks and pressure triggers must remain independent of the D-pad");
+        axis(SDL_GAMEPAD_AXIS_LEFTX, 0); axis(SDL_GAMEPAD_AXIS_RIGHTX, 0); axis(SDL_GAMEPAD_AXIS_LEFT_TRIGGER, 0);
         require(InputBindings::identify("game.cue", "/cores/mednafen_saturn_libretro.so") == "saturn",
                 "Beetle Saturn core inference failed");
         require(InputBindings::identify("game.bs", "/cores/bsnes_libretro.so") == "snes",

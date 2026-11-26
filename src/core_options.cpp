@@ -221,7 +221,8 @@ void CoreOptions::register_definitions(std::vector<Definition> definitions, Fron
         if (key == "citra_resolution_factor" || key == "ppsspp_internal_resolution" || key == "dolphin_efb_scale" ||
             key == "swanstation_GPU_ResolutionScale" || key == "melonds_opengl_resolution" ||
             key == "mupen64plus-43screensize" || key == "mupen64plus-parallel-rdp-upscaling" ||
-            key == "reicast_internal_resolution" || key == "flycast_internal_resolution")
+            key == "reicast_internal_resolution" || key == "flycast_internal_resolution" ||
+            key == "pcsx2_upscale_multiplier" || key == "armsx2_upscale")
         {
             resolution_key = key;
             ui.resolution_needs_restart = key == "dolphin_efb_scale" || key == "mupen64plus-43screensize" ||

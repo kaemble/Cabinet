@@ -64,6 +64,21 @@ const std::vector<SystemInfo>& systems()
              "swanstation",
              "SwanStation",
              {"cue", "chd", "m3u", "pbp", "bin", "img", "iso", "ecm", "mds", "exe", "psexe"}},
+#if defined(__aarch64__)
+            {"ps2",
+             system_display_name("ps2"),
+             "PS2",
+             "armsx2",
+             "ARMSX2",
+             {"elf", "iso", "ciso", "chd", "cso", "zso", "bin", "mdf", "nrg", "dump", "gz", "img", "irx", "m3u"}},
+#else
+            {"ps2",
+             system_display_name("ps2"),
+             "PS2",
+             "pcee2",
+             "PCEE2",
+             {"iso", "chd", "cso", "zso", "gz", "bin", "cue", "mdf", "nrg", "m3u", "elf", "irx", "gs", "acgame"}},
+#endif
             {"snes",
              system_display_name("snes"),
              "SNES",

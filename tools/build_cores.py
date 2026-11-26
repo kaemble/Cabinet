@@ -73,14 +73,16 @@ def load_lock(path):
         for field in ("build_directory", "artifact_path", "makefile"):
             if field in core and not relative_path(core[field]):
                 raise ValueError(f"Invalid {field}: {name}")
-        if "architectures" in core and set(core["architectures"]) != set(MACHINES):
-            raise ValueError(f"Missing architecture recipe: {name}")
+        if "architectures" in core and (not core["architectures"] or not set(core["architectures"]) <= set(MACHINES)):
+            raise ValueError(f"Invalid architecture recipes: {name}")
         paths = set()
         for dependency in core.get("submodules", []):
             check_source(dependency)
             if not relative_path(dependency["path"]) or dependency["path"] in paths:
                 raise ValueError(f"Invalid or duplicate submodule: {name}")
             paths.add(dependency["path"])
+            if "cmake" in dependency and not isinstance(dependency["cmake"], dict):
+                raise ValueError(f"Invalid dependency build options: {name}")
         for asset in core.get("assets", []):
             if not relative_path(asset["source"]) or not relative_path(asset["destination"]) or not asset["destination"].startswith("system/"):
                 raise ValueError(f"Invalid asset path: {name}")
@@ -89,6 +91,14 @@ def load_lock(path):
 
 def recipe_digest(core):
     return hashlib.sha256(json.dumps(core, sort_keys=True).encode()).hexdigest()
+
+
+def selected_cores(lock, arch, selected=None):
+    available = {name for name, core in lock["cores"].items() if arch in core.get("architectures", MACHINES)}
+    names = list(dict.fromkeys(selected if selected is not None else (name for name in lock["cores"] if name in available)))
+    if set(names) - available:
+        raise ValueError(f"Unknown or unsupported cores for {arch}: {sorted(set(names) - available)}")
+    return names
 
 
 def owned_files(name, core, files):
@@ -117,7 +127,7 @@ def read_bundle(bundle, arch):
     artifacts = set()
     for name, receipt in manifest["cores"].items():
         required = {"artifact", "recipe_sha256", "files", "toolchain_sha256"}
-        if name not in lock["cores"] or not required.issubset(receipt):
+        if name not in selected_cores(lock, arch) or not required.issubset(receipt):
             raise ValueError(f"Invalid core receipt: {name}")
         for relative, checksum in receipt["files"].items():
             if relative in claimed or manifest["files"].get(relative) != checksum:
@@ -134,8 +144,8 @@ def read_bundle(bundle, arch):
 
 def verify(bundle, lock_path, arch, selected=None):
     lock = load_lock(lock_path)
+    names = set(selected_cores(lock, arch, selected))
     manifest = read_bundle(bundle, arch)
-    names = set(selected or lock["cores"])
     if not names <= set(manifest["cores"]) or (selected is None and set(manifest["cores"]) != names):
         raise ValueError("Core bundle selection is incomplete or unexpected")
     if selected is None and manifest["lock_sha256"] != digest(lock_path):
@@ -205,6 +215,8 @@ def copy_notices(source, destination):
 
 
 def build_core(name, core, arch, toolchain, compilers, cache, temporary, stage, jobs, offline):
+    if arch not in core.get("architectures", MACHINES):
+        raise ValueError(f"Unsupported architecture for {name}: {arch}")
     print(f"Building {name} for {arch}", flush=True)
     source = temporary / name / core["source_directory"]
     ready = temporary / "sources-ready"
@@ -226,12 +238,35 @@ def build_core(name, core, arch, toolchain, compilers, cache, temporary, stage, 
                 path.write_text(contents)
     build = temporary / (name + "-build")
     recipe = core.get("architectures", {}).get(arch, {})
+    compiler_options = {key: value for key, value in {**core.get("cmake", {}), **recipe}.items()
+                        if key in ("CMAKE_C_COMPILER", "CMAKE_CXX_COMPILER",
+                                   "CMAKE_C_COMPILER_TARGET", "CMAKE_CXX_COMPILER_TARGET")}
+    prefix = temporary / "dependencies"
+    for index, pin in enumerate(core.get("submodules", [])):
+        if "cmake" not in pin:
+            continue
+        dependency_build = temporary / f"dependency-build-{index}"
+        command = ["cmake", "-S", source / pin["path"], "-B", dependency_build,
+                   "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_POSITION_INDEPENDENT_CODE=ON",
+                   "-DBUILD_SHARED_LIBS=OFF", f"-DCMAKE_INSTALL_PREFIX={prefix}",
+                   f"-DCMAKE_STAGING_PREFIX={prefix}",
+                   "-DCMAKE_INSTALL_LIBDIR=lib", f"-DCMAKE_PREFIX_PATH={prefix}",
+                   *[f"-D{key}={value}" for key, value in sorted({**pin["cmake"], **compiler_options}.items())]]
+        if toolchain:
+            command.append(f"-DCMAKE_TOOLCHAIN_FILE={toolchain}")
+        run(command, temporary)
+        run(["cmake", "--build", dependency_build, "--parallel", jobs], temporary)
+        run(["cmake", "--install", dependency_build], temporary)
     directory = source / core.get("build_directory", ".")
     if core.get("build_system", "cmake") == "cmake":
         options = {**core["cmake"], **recipe}
-        arguments = {key: str(value).replace("{source}", str(source)) for key, value in options.items()}
+        arguments = {key: str(value).replace("{source}", str(source)).replace("{dependencies}", str(prefix))
+                     for key, value in options.items()}
         command = ["cmake", "-S", directory, "-B", build, "-DCMAKE_BUILD_TYPE=Release",
                    *[f"-D{key}={value}" for key, value in sorted(arguments.items())]]
+        if any("cmake" in pin for pin in core.get("submodules", [])):
+            command.append(f"-DCMAKE_PREFIX_PATH={prefix}")
+            command.append(f"-DCMAKE_STAGING_PREFIX={prefix}")
         if toolchain:
             command.append(f"-DCMAKE_TOOLCHAIN_FILE={toolchain}")
         run(command, temporary)
@@ -341,7 +376,7 @@ def publish_core(output, name, receipt, core_stage, lock_bytes, arch, provenance
         receipts = dict(existing["cores"]) if existing else {}
         # A removed recipe retires only that core's owned files. This also
         # handles core replacements without leaving an unpackageable bundle.
-        retired = set(receipts) - set(json.loads(lock_bytes)["cores"])
+        retired = set(receipts) - set(selected_cores(json.loads(lock_bytes), arch))
         for retired_name in retired:
             for relative in receipts.pop(retired_name)["files"]:
                 (stage / relative).unlink()
@@ -390,9 +425,7 @@ def build_bundle(args, output):
     lock = load_lock(args.lock)
     if json.loads(lock_bytes) != lock:
         raise ValueError("Lockfile changed while starting the build")
-    names = list(dict.fromkeys(args.core or lock["cores"]))
-    if set(names) - set(lock["cores"]):
-        raise ValueError(f"Unknown cores: {sorted(set(names) - set(lock['cores']))}")
+    names = selected_cores(lock, args.arch, args.core)
     work = args.work_dir.resolve()
     cache = work / "downloads"
     cache.mkdir(parents=True, exist_ok=True)

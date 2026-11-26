@@ -73,7 +73,7 @@ python3 packaging/debian/build.py ArmadaOS cabinet --jobs 6
 | `aarch64` | ARM64 | Armada DRM disabled |
 | `ArmadaOS` | ARM64 | `-DCABINET_ARMADA_DRM=ON` |
 
-On an amd64 Docker daemon, the ARM64 presets use Debian's GNU aarch64 cross compiler and `:arm64` development packages, including graphics and audio libraries. No ARM machine or host QEMU/binfmt setup is needed. On an arm64 daemon they build natively. The `x86_64` preset requires an amd64 daemon. The daemon architecture, rather than the client machine's architecture, determines the build host. Use a local Docker daemon: the checkout is bind-mounted from the client's filesystem.
+On an amd64 Docker daemon, the ARM64 presets use Debian's GNU aarch64 cross compiler by default, or Clang targeting aarch64 for cores that require it, with `:arm64` development packages including graphics and audio libraries. No ARM machine or host QEMU/binfmt setup is needed. On an arm64 daemon they build natively. The `x86_64` preset requires an amd64 daemon. The daemon architecture, rather than the client machine's architecture, determines the build host. Use a local Docker daemon: the checkout is bind-mounted from the client's filesystem.
 
 ArmadaOS cross-builds compile Cabinet, static SDL, and the cores with `-O3 -march=armv8.2-a+fp16+dotprod -mtune=cortex-a78`. These target-specific flags do not apply to generic `aarch64` builds, native builds, or core code generators that run on the build host.
 

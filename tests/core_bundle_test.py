@@ -76,6 +76,68 @@ class BundleTests(unittest.TestCase):
                         if " -c " in line:
                             self.assertIn(f"-O2 -fPIC -DREQUIRED_UPSTREAM_DEFINE {flags} -c ", line)
 
+    @unittest.skipUnless(shutil.which("aarch64-linux-gnu-gcc"), "requires the aarch64 cross compiler")
+    def test_static_dependency_builds_use_target_toolchain_and_private_prefix(self):
+        for compiler in ("gcc", "clang"):
+            if compiler == "clang" and not shutil.which("clang"):
+                continue
+            with self.subTest(compiler=compiler), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                work = root / "work"
+                source = work / "probe/source"
+                dependency = source / "vendor/helper"
+                dependency.mkdir(parents=True)
+                (work / "sources-ready").touch()
+                guard = ('#if !defined(__clang__) || !defined(__aarch64__)\n#error Expected ARM64 Clang\n#endif\n'
+                         if compiler == "clang" else "")
+                (dependency / "helper.c").write_text(guard + "int helper(void) { return 42; }\n")
+                (dependency / "helper.cpp").write_text(guard + "int helper_cpp() { return 42; }\n")
+                (dependency / "helper.h").write_text("int helper(void);\n")
+                (dependency / "CMakeLists.txt").write_text(
+                    'cmake_minimum_required(VERSION 3.20)\nproject(helper C CXX)\n'
+                    'add_library(helper helper.c helper.cpp)\n'
+                    'install(TARGETS helper ARCHIVE DESTINATION lib)\n'
+                    'install(FILES helper.h DESTINATION include)\n')
+                (source / "probe.c").write_text(guard + '#include <helper.h>\nint probe(void) { return helper(); }\n')
+                (source / "probe.cpp").write_text(guard + "int probe_cpp() { return 42; }\n")
+                (source / "CMakeLists.txt").write_text(
+                    'cmake_minimum_required(VERSION 3.20)\nproject(probe C CXX)\n'
+                    'find_library(HELPER_LIBRARY helper REQUIRED)\n'
+                    'find_path(HELPER_INCLUDE helper.h REQUIRED)\n'
+                    'add_library(probe MODULE probe.c probe.cpp)\n'
+                    'target_link_libraries(probe PRIVATE "${HELPER_LIBRARY}")\n'
+                    'target_include_directories(probe PRIVATE "${HELPER_INCLUDE}")\n'
+                    'set_target_properties(probe PROPERTIES PREFIX "")\n')
+                recipe = dict(source_directory="source", target="probe", artifact="probe.so", cmake={},
+                              license_files=[], version="test", commit="test", repository="test", sha256="test",
+                              submodules=[dict(path="vendor/helper", cmake={})])
+                if compiler == "clang":
+                    recipe["architectures"] = {"aarch64": {
+                        "CMAKE_C_COMPILER": "clang", "CMAKE_CXX_COMPILER": "clang++",
+                        "CMAKE_C_COMPILER_TARGET": "aarch64-linux-gnu", "CMAKE_CXX_COMPILER_TARGET": "aarch64-linux-gnu"}}
+                stage = root / "stage"
+                stage.mkdir()
+                toolchain = ROOT / "packaging/debian/aarch64.cmake"
+                cores.build_core("probe", recipe, "aarch64", toolchain, {}, root / "cache", work, stage, 1, True)
+                cores.elf_check(stage / "probe.so", "aarch64")
+                self.assertTrue((work / "dependencies/lib/libhelper.a").is_file())
+                cache = (work / "probe-build/CMakeCache.txt").read_text()
+                self.assertIn(f"HELPER_LIBRARY:FILEPATH={work}/dependencies/lib/libhelper.a", cache)
+
+    def test_architecture_specific_selection(self):
+        lock = cores.load_lock(ROOT / "cores.lock.json")
+        for arch, expected, excluded in (("x86_64", "pcee2", "armsx2"), ("aarch64", "armsx2", "pcee2")):
+            with self.subTest(arch=arch):
+                names = cores.selected_cores(lock, arch)
+                self.assertIn(expected, names)
+                self.assertNotIn(excluded, names)
+                self.assertIn("mgba", names)
+                self.assertEqual(cores.selected_cores(lock, arch, [expected, expected]), [expected])
+                with self.assertRaisesRegex(ValueError, "unsupported"):
+                    cores.selected_cores(lock, arch, [excluded])
+                with self.assertRaisesRegex(ValueError, "unsupported"):
+                    cores.verify(Path("/nonexistent-bundle"), ROOT / "cores.lock.json", arch, [excluded])
+
     def test_system_catalog_is_fully_locked(self):
         lock = cores.load_lock(ROOT / "cores.lock.json")
         catalog = (ROOT / "src/library.cpp").read_text()
@@ -274,12 +336,13 @@ set_target_properties(metadata_probe PROPERTIES PREFIX "")
                 lock = ROOT / "cores.lock.json"
                 data = cores.load_lock(lock)
                 (bundle / "cores.lock.json").write_bytes(lock.read_bytes())
-                for recipe in data["cores"].values():
+                recipes = {name: data["cores"][name] for name in cores.selected_cores(data, arch)}
+                for recipe in recipes.values():
                     header = bytearray(64)
                     header[:6] = b"\x7fELF\x02\x01"
                     struct.pack_into("<HH", header, 16, 3, machine)
                     (bundle / recipe["artifact"]).write_bytes(header)
-                for recipe in data["cores"].values():
+                for recipe in recipes.values():
                     for asset in recipe.get("assets", []):
                         target = bundle / asset["destination"] / "fixture"
                         target.parent.mkdir(parents=True, exist_ok=True)
@@ -287,7 +350,7 @@ set_target_properties(metadata_probe PROPERTIES PREFIX "")
                 manifest = {"schema": 1, "architecture": arch, "lock_sha256": cores.digest(lock),
                             "cores": {},
                             "files": {p.relative_to(bundle).as_posix(): cores.digest(p) for p in bundle.rglob("*") if p.is_file()}}
-                for name, recipe in data["cores"].items():
+                for name, recipe in recipes.items():
                     manifest["cores"][name] = {"artifact": recipe["artifact"], "recipe_sha256": cores.recipe_digest(recipe),
                                                "files": cores.owned_files(name, recipe, manifest["files"]),
                                                "toolchain_sha256": None, "provenance": {}}

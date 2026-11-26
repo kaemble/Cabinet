@@ -1295,6 +1295,302 @@
         }
       ],
       "archive_git_metadata": true
+    },
+    "pcee2": {
+      "version": "git-75d8ee051af1",
+      "repository": "https://github.com/WizzardSK/pcee2-libretro.git",
+      "commit": "75d8ee051af15144a07d57439bd6e7ea0618aa7e",
+      "source": "https://codeload.github.com/WizzardSK/pcee2-libretro/tar.gz/75d8ee051af15144a07d57439bd6e7ea0618aa7e",
+      "sha256": "87698c4f51c20206cc838b1cecd7e0ae2f3466b11ab8d9fb30f3913e40e6c644",
+      "source_directory": "pcee2-libretro-75d8ee051af15144a07d57439bd6e7ea0618aa7e",
+      "license": "GPL-3.0-or-later",
+      "license_files": [
+        "COPYING.GPLv3",
+        "THIRD_PARTY_LICENSES.html"
+      ],
+      "target": "pcee2_libretro",
+      "artifact": "pcee2_libretro.so",
+      "artifact_path": "bin/pcee2_libretro.so",
+      "cmake": {
+        "ENABLE_LIBRETRO": "ON",
+        "ENABLE_SETCAP": "OFF",
+        "USE_BACKTRACE": "OFF",
+        "X11_API": "OFF",
+        "WAYLAND_API": "OFF",
+        "DISABLE_ADVANCE_SIMD": "ON",
+        "CMAKE_DISABLE_PRECOMPILE_HEADERS": "ON",
+        "ENABLE_PARALLEL_GS": "OFF",
+        "SHADERC_STATIC": "ON",
+        "SHADERC_LIBRARY": "{dependencies}/lib/libshaderc_combined.a"
+      },
+      "architectures": {
+        "x86_64": {}
+      },
+      "submodules": [
+        {
+          "path": "vendor/plutovg",
+          "repository": "https://github.com/sammycage/plutovg.git",
+          "commit": "5695a711dd1cff1f01fa6542f3fe6a15de082c63",
+          "source": "https://codeload.github.com/sammycage/plutovg/tar.gz/5695a711dd1cff1f01fa6542f3fe6a15de082c63",
+          "sha256": "b32c0b3da4933f4f0a56cd91a739608aef67a796da6e0039c30511edf7e76cfe",
+          "source_directory": "plutovg-5695a711dd1cff1f01fa6542f3fe6a15de082c63",
+          "cmake": {
+            "PLUTOVG_BUILD_EXAMPLES": "OFF"
+          }
+        },
+        {
+          "path": "vendor/plutosvg",
+          "repository": "https://github.com/sammycage/plutosvg.git",
+          "commit": "31f7d2675416cd777c8e86220b035364873b2a8b",
+          "source": "https://codeload.github.com/sammycage/plutosvg/tar.gz/31f7d2675416cd777c8e86220b035364873b2a8b",
+          "sha256": "8778460051658dfb9ab10b89c193abbcf6c097c321fd6f054927eafca2772822",
+          "source_directory": "plutosvg-31f7d2675416cd777c8e86220b035364873b2a8b",
+          "cmake": {
+            "PLUTOSVG_ENABLE_FREETYPE": "ON",
+            "PLUTOSVG_BUILD_EXAMPLES": "OFF"
+          }
+        },
+        {
+          "path": "vendor/rapidyaml",
+          "repository": "https://github.com/biojppm/rapidyaml.git",
+          "commit": "b56567b0bd24e9ce7beb08d6950a5732f62f6e74",
+          "source": "https://codeload.github.com/biojppm/rapidyaml/tar.gz/b56567b0bd24e9ce7beb08d6950a5732f62f6e74",
+          "sha256": "808e3e2de144d8856fba1e857afc605f850afbcd9c6545781da0dcc78686ac37",
+          "source_directory": "rapidyaml-b56567b0bd24e9ce7beb08d6950a5732f62f6e74",
+          "cmake": {
+            "RYML_BUILD_TESTS": "OFF",
+            "RYML_BUILD_TOOLS": "OFF",
+            "CMAKE_POLICY_VERSION_MINIMUM": "3.5"
+          }
+        },
+        {
+          "path": "vendor/SDL",
+          "repository": "https://github.com/libsdl-org/SDL.git",
+          "commit": "f00dc919ca35b9756316e86c4777392de442f9b2",
+          "source": "https://codeload.github.com/libsdl-org/SDL/tar.gz/f00dc919ca35b9756316e86c4777392de442f9b2",
+          "sha256": "e6a9c4e75de8fe719f922dddc208627f77754a502909f457a1355981f20c21e0",
+          "source_directory": "SDL-f00dc919ca35b9756316e86c4777392de442f9b2",
+          "cmake": {
+            "SDL_SHARED": "OFF",
+            "SDL_STATIC": "ON",
+            "SDL_DEPS_SHARED": "ON",
+            "SDL_TEST_LIBRARY": "OFF",
+            "SDL_TESTS": "OFF",
+            "SDL_EXAMPLES": "OFF"
+          }
+        },
+        {
+          "path": "vendor/rapidyaml/ext/c4core",
+          "repository": "https://github.com/biojppm/c4core.git",
+          "commit": "eca89eaa1838c21dd554c6696d7327ce31b6ba88",
+          "source": "https://codeload.github.com/biojppm/c4core/tar.gz/eca89eaa1838c21dd554c6696d7327ce31b6ba88",
+          "sha256": "a86f6cbe68a26ec38269ea7ede61eb039e8f11e62a25019e3bfeb8e28209e753",
+          "source_directory": "c4core-eca89eaa1838c21dd554c6696d7327ce31b6ba88"
+        },
+        {
+          "path": "vendor/rapidyaml/ext/c4core/cmake",
+          "repository": "https://github.com/biojppm/cmake.git",
+          "commit": "10581a42ce4667b407dde5858dfd0be95afb00b6",
+          "source": "https://codeload.github.com/biojppm/cmake/tar.gz/10581a42ce4667b407dde5858dfd0be95afb00b6",
+          "sha256": "e31785aed5e401fd4fcbeef8a191a2f5ff9a8bef31ca3aad90f82e2ca512d888",
+          "source_directory": "cmake-10581a42ce4667b407dde5858dfd0be95afb00b6"
+        },
+        {
+          "path": "vendor/rapidyaml/ext/c4core/src/c4/ext/fast_float",
+          "repository": "https://github.com/fastfloat/fast_float.git",
+          "commit": "eb9ab42c0aa86d3cc41871ba7306527d95077b3b",
+          "source": "https://codeload.github.com/fastfloat/fast_float/tar.gz/eb9ab42c0aa86d3cc41871ba7306527d95077b3b",
+          "sha256": "591fa908f3fbf3350c203d4acc95f8f89213f1644084bb76bb77c24b36a960a4",
+          "source_directory": "fast_float-eb9ab42c0aa86d3cc41871ba7306527d95077b3b"
+        },
+        {
+          "path": "vendor/rapidyaml/ext/c4core/src/c4/ext/debugbreak",
+          "repository": "https://github.com/biojppm/debugbreak.git",
+          "commit": "328e4abca3384cbd0a69e70f263cc7b2794bff09",
+          "source": "https://codeload.github.com/biojppm/debugbreak/tar.gz/328e4abca3384cbd0a69e70f263cc7b2794bff09",
+          "sha256": "e90bc63f50e516af1a65991ffa0410fd2698fd0936041f387824b2114e72a549",
+          "source_directory": "debugbreak-328e4abca3384cbd0a69e70f263cc7b2794bff09"
+        },
+        {
+          "path": "3rdparty/pcsx2_patches",
+          "repository": "https://github.com/PCSX2/pcsx2_patches.git",
+          "commit": "9f82a4d2b8a2aaf83807421f18d5d30263ea826c",
+          "source": "https://codeload.github.com/PCSX2/pcsx2_patches/tar.gz/9f82a4d2b8a2aaf83807421f18d5d30263ea826c",
+          "sha256": "f56bd97dcf0dc78e895700f6c0aef52eb24b94f5e817e26e8a0868f033e4f36a",
+          "source_directory": "pcsx2_patches-9f82a4d2b8a2aaf83807421f18d5d30263ea826c"
+        },
+        {
+          "path": "vendor/shaderc",
+          "repository": "https://github.com/google/shaderc.git",
+          "commit": "2c8cae778eec0283b44acbe7ed1a386865d78799",
+          "source": "https://codeload.github.com/google/shaderc/tar.gz/2c8cae778eec0283b44acbe7ed1a386865d78799",
+          "sha256": "e6d6492a363cdef271e466f67cae3ad0d48f7e748491b8e2fe51424c08e391ad",
+          "source_directory": "shaderc-2c8cae778eec0283b44acbe7ed1a386865d78799",
+          "cmake": {
+            "SHADERC_SKIP_TESTS": "ON",
+            "SHADERC_SKIP_EXAMPLES": "ON",
+            "SHADERC_SKIP_COPYRIGHT_CHECK": "ON",
+            "SPIRV_SKIP_EXECUTABLES": "ON",
+            "ENABLE_GLSLANG_BINARIES": "OFF",
+            "CMAKE_POLICY_VERSION_MINIMUM": "3.5"
+          }
+        },
+        {
+          "path": "vendor/shaderc/third_party/glslang",
+          "repository": "https://github.com/KhronosGroup/glslang.git",
+          "commit": "90afccfbd49dff0349d86a41762e9de24e1df811",
+          "source": "https://codeload.github.com/KhronosGroup/glslang/tar.gz/90afccfbd49dff0349d86a41762e9de24e1df811",
+          "sha256": "2c8237a5ec9969d8fb447d35ca653d11caaf6f7ba8a5ca604ec73da13af4e360",
+          "source_directory": "glslang-90afccfbd49dff0349d86a41762e9de24e1df811"
+        },
+        {
+          "path": "vendor/shaderc/third_party/spirv-headers",
+          "repository": "https://github.com/KhronosGroup/SPIRV-Headers.git",
+          "commit": "29981f65241605e08b0ede4cfeb999fe3b723c6a",
+          "source": "https://codeload.github.com/KhronosGroup/SPIRV-Headers/tar.gz/29981f65241605e08b0ede4cfeb999fe3b723c6a",
+          "sha256": "232899f1ad4104fb5bc377b94596c7621575eee62ad9a9e8f929b63a7dd8a7ad",
+          "source_directory": "SPIRV-Headers-29981f65241605e08b0ede4cfeb999fe3b723c6a"
+        },
+        {
+          "path": "vendor/shaderc/third_party/spirv-tools",
+          "repository": "https://github.com/KhronosGroup/SPIRV-Tools.git",
+          "commit": "b707790a898e44038547df54580022fc1cf89c3d",
+          "source": "https://codeload.github.com/KhronosGroup/SPIRV-Tools/tar.gz/b707790a898e44038547df54580022fc1cf89c3d",
+          "sha256": "05d8af89737bde57571c48dbd36714c9f520a69623e14de72c3be6b600e277d6",
+          "source_directory": "SPIRV-Tools-b707790a898e44038547df54580022fc1cf89c3d"
+        }
+      ],
+      "assets": [
+        {
+          "source": "bin/resources",
+          "destination": "system/pcsx2/resources"
+        }
+      ]
+    },
+    "armsx2": {
+      "version": "git-46f157520540",
+      "repository": "https://github.com/ARMSX2/ARMSX2.git",
+      "commit": "46f157520540a2538b8cb48f4695398ef2908025",
+      "source": "https://codeload.github.com/ARMSX2/ARMSX2/tar.gz/46f157520540a2538b8cb48f4695398ef2908025",
+      "sha256": "d15e92d6aefbb12e05707bdf63f9e86d2279fbc944854839dbcce041e5b3c80b",
+      "source_directory": "ARMSX2-46f157520540a2538b8cb48f4695398ef2908025",
+      "license": "GPL-3.0-or-later",
+      "license_files": [
+        "COPYING.GPLv3"
+      ],
+      "target": "pcsx2-libretro",
+      "artifact": "armsx2_libretro.so",
+      "artifact_path": "bin/armsx2_libretro.so",
+      "cmake": {
+        "ENABLE_LIBRETRO": "ON",
+        "ENABLE_QT_UI": "OFF",
+        "ENABLE_SDL_FRONTEND": "OFF",
+        "ENABLE_GSRUNNER": "OFF",
+        "ENABLE_TESTS": "OFF",
+        "ENABLE_RECOMPILER_TEST_HOOKS": "OFF",
+        "ENABLE_SETCAP": "OFF",
+        "USE_BACKTRACE": "OFF",
+        "X11_API": "OFF",
+        "WAYLAND_API": "OFF",
+        "DISABLE_ADVANCE_SIMD": "ON",
+        "CMAKE_DISABLE_PRECOMPILE_HEADERS": "ON",
+        "SHADERC_LIBRARY": "{dependencies}/lib/libshaderc_combined.a"
+      },
+      "architectures": {
+        "aarch64": {
+          "CMAKE_C_COMPILER": "clang",
+          "CMAKE_CXX_COMPILER": "clang++",
+          "CMAKE_C_COMPILER_TARGET": "aarch64-linux-gnu",
+          "CMAKE_CXX_COMPILER_TARGET": "aarch64-linux-gnu"
+        }
+      },
+      "submodules": [
+        {
+          "path": "vendor/plutovg",
+          "repository": "https://github.com/sammycage/plutovg.git",
+          "commit": "5695a711dd1cff1f01fa6542f3fe6a15de082c63",
+          "source": "https://codeload.github.com/sammycage/plutovg/tar.gz/5695a711dd1cff1f01fa6542f3fe6a15de082c63",
+          "sha256": "b32c0b3da4933f4f0a56cd91a739608aef67a796da6e0039c30511edf7e76cfe",
+          "source_directory": "plutovg-5695a711dd1cff1f01fa6542f3fe6a15de082c63",
+          "cmake": {
+            "PLUTOVG_BUILD_EXAMPLES": "OFF"
+          }
+        },
+        {
+          "path": "vendor/plutosvg",
+          "repository": "https://github.com/sammycage/plutosvg.git",
+          "commit": "31f7d2675416cd777c8e86220b035364873b2a8b",
+          "source": "https://codeload.github.com/sammycage/plutosvg/tar.gz/31f7d2675416cd777c8e86220b035364873b2a8b",
+          "sha256": "8778460051658dfb9ab10b89c193abbcf6c097c321fd6f054927eafca2772822",
+          "source_directory": "plutosvg-31f7d2675416cd777c8e86220b035364873b2a8b",
+          "cmake": {
+            "PLUTOSVG_ENABLE_FREETYPE": "ON",
+            "PLUTOSVG_BUILD_EXAMPLES": "OFF"
+          }
+        },
+        {
+          "path": "vendor/SDL",
+          "repository": "https://github.com/libsdl-org/SDL.git",
+          "commit": "f00dc919ca35b9756316e86c4777392de442f9b2",
+          "source": "https://codeload.github.com/libsdl-org/SDL/tar.gz/f00dc919ca35b9756316e86c4777392de442f9b2",
+          "sha256": "e6a9c4e75de8fe719f922dddc208627f77754a502909f457a1355981f20c21e0",
+          "source_directory": "SDL-f00dc919ca35b9756316e86c4777392de442f9b2",
+          "cmake": {
+            "SDL_SHARED": "OFF",
+            "SDL_STATIC": "ON",
+            "SDL_DEPS_SHARED": "ON",
+            "SDL_TEST_LIBRARY": "OFF",
+            "SDL_TESTS": "OFF",
+            "SDL_EXAMPLES": "OFF"
+          }
+        },
+        {
+          "path": "vendor/shaderc",
+          "repository": "https://github.com/google/shaderc.git",
+          "commit": "2c8cae778eec0283b44acbe7ed1a386865d78799",
+          "source": "https://codeload.github.com/google/shaderc/tar.gz/2c8cae778eec0283b44acbe7ed1a386865d78799",
+          "sha256": "e6d6492a363cdef271e466f67cae3ad0d48f7e748491b8e2fe51424c08e391ad",
+          "source_directory": "shaderc-2c8cae778eec0283b44acbe7ed1a386865d78799",
+          "cmake": {
+            "SHADERC_SKIP_TESTS": "ON",
+            "SHADERC_SKIP_EXAMPLES": "ON",
+            "SHADERC_SKIP_COPYRIGHT_CHECK": "ON",
+            "SPIRV_SKIP_EXECUTABLES": "ON",
+            "ENABLE_GLSLANG_BINARIES": "OFF",
+            "CMAKE_POLICY_VERSION_MINIMUM": "3.5"
+          }
+        },
+        {
+          "path": "vendor/shaderc/third_party/glslang",
+          "repository": "https://github.com/KhronosGroup/glslang.git",
+          "commit": "90afccfbd49dff0349d86a41762e9de24e1df811",
+          "source": "https://codeload.github.com/KhronosGroup/glslang/tar.gz/90afccfbd49dff0349d86a41762e9de24e1df811",
+          "sha256": "2c8237a5ec9969d8fb447d35ca653d11caaf6f7ba8a5ca604ec73da13af4e360",
+          "source_directory": "glslang-90afccfbd49dff0349d86a41762e9de24e1df811"
+        },
+        {
+          "path": "vendor/shaderc/third_party/spirv-headers",
+          "repository": "https://github.com/KhronosGroup/SPIRV-Headers.git",
+          "commit": "29981f65241605e08b0ede4cfeb999fe3b723c6a",
+          "source": "https://codeload.github.com/KhronosGroup/SPIRV-Headers/tar.gz/29981f65241605e08b0ede4cfeb999fe3b723c6a",
+          "sha256": "232899f1ad4104fb5bc377b94596c7621575eee62ad9a9e8f929b63a7dd8a7ad",
+          "source_directory": "SPIRV-Headers-29981f65241605e08b0ede4cfeb999fe3b723c6a"
+        },
+        {
+          "path": "vendor/shaderc/third_party/spirv-tools",
+          "repository": "https://github.com/KhronosGroup/SPIRV-Tools.git",
+          "commit": "b707790a898e44038547df54580022fc1cf89c3d",
+          "source": "https://codeload.github.com/KhronosGroup/SPIRV-Tools/tar.gz/b707790a898e44038547df54580022fc1cf89c3d",
+          "sha256": "05d8af89737bde57571c48dbd36714c9f520a69623e14de72c3be6b600e277d6",
+          "source_directory": "SPIRV-Tools-b707790a898e44038547df54580022fc1cf89c3d"
+        }
+      ],
+      "assets": [
+        {
+          "source": "bin/resources",
+          "destination": "system/pcsx2/resources"
+        }
+      ]
     }
   }
 }

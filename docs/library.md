@@ -36,11 +36,13 @@ Encrypted archives, unsafe or duplicate member names, corrupt data, nested ZIPs,
 
 ## Firmware and system assets
 
-Place firmware under `~/.local/share/cabinet/system/`, or `DIR/system/` with `--data-dir DIR`. Home prompts for a compatible BIOS when importing PlayStation or Saturn content; setup can be skipped or reopened through **BIOS files** in game details. Recognized 512 KiB images are validated and copied to the expected filename. Proprietary BIOS files are never downloaded or bundled.
+Place firmware under `~/.local/share/cabinet/system/`, or `DIR/system/` with `--data-dir DIR`. Home prompts for a compatible BIOS when importing PlayStation (PS1), PlayStation 2, or Saturn content; setup can be skipped or reopened through **BIOS files** in game details. PS1 and Saturn images are checked against known 512 KiB BIOS checksums. PS2 dumps (4–8 MiB) are checked for a valid ROM directory and console version metadata, then copied into `system/pcsx2/bios/` with a stable checksum-based filename. Existing PS2 dumps in that folder are also detected. Proprietary BIOS files are never downloaded or bundled.
 
 The verified core bundle includes redistributable PPSSPP and Dolphin assets. For development, copy `system/PPSSPP/` and `system/dolphin-emu/` from the bundle into Home's system directory. AppImage setup is described in [building and packaging](building.md).
 
 For Dreamcast, import a `.cue` or `.gdi` descriptor with its referenced tracks kept together; `.cdi`, `.chd`, and `.m3u` are also recognized. Flycast supports an HLE BIOS; an optional original BIOS belongs at `system/dc/dc_boot.bin`. It defaults to per-game VMU cards. Nintendo 3DS content opens directly by path and does not support ZIP imports.
+
+PlayStation 2 uses PCEE2 on x86_64 and ARMSX2 on aarch64. Use **BIOS files** in game details to install a BIOS, and copy the bundled `system/pcsx2/resources/` into Cabinet’s system directory. See [core builds](cores.md#playstation-2) for formats, dependencies, and native memory-card storage.
 
 ## Launch options and logging
 
