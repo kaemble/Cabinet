@@ -26,8 +26,8 @@ int main() {
         std::filesystem::create_directories(test_home);
         SDL_setenv_unsafe("HOME", test_home.string().c_str(), 1);
         const auto automatic_api = parse({"--rom", "game.iso", "--core", "renamed.so"});
-        for (const auto core : {"dolphin-emu", "Dolphin", "dolphin", "Flycast"})
-            require(automatic_api.prefers_vulkan(core), "Dolphin/Flycast did not default to Vulkan");
+        for (const auto core : {"dolphin-emu", "Dolphin", "dolphin", "Flycast", "PCEE2", "ARMSX2"})
+            require(automatic_api.prefers_vulkan(core), "Hardware core did not default to Vulkan");
         for (const auto core : {"Azahar", "PPSSPP", "Mupen64Plus-Next", "melonDS DS", "Cabinet test core", ""})
             require(!automatic_api.prefers_vulkan(core), "Unrelated core default changed to Vulkan");
         const auto vulkan_api = parse({"--rom", "game.iso", "--core", "core.so", "--vulkan"});

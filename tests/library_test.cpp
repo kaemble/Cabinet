@@ -98,6 +98,19 @@ int main(int argc, char** argv) {
             {
                 require(systems()[system_index(system)].core == "blastem", "Sega cartridges must default to BlastEm");
             }
+            const auto& ps2 = systems()[system_index("ps2")];
+#if defined(__aarch64__)
+            require(ps2.core == "armsx2" && ps2.core_name == "ARMSX2", "ARM64 PS2 must use ARMSX2");
+#else
+            require(ps2.core == "pcee2" && ps2.core_name == "PCEE2", "x86-64 PS2 must use PCEE2");
+#endif
+            require(!ps2.memory_content, "PS2 discs must load by path");
+            for (const auto filename : {"GAME.ISO", "game.chd", "game.cso", "game.zso", "game.elf", "game.m3u"})
+            {
+                const auto candidates = identify_systems(filename);
+                require(std::find(candidates.begin(), candidates.end(), system_index("ps2")) != candidates.end(),
+                        "PS2 content missing from Home catalog");
+            }
             require(systems()[system_index("snes")].core == "bsnes", "SNES must default to bsnes");
             require(systems()[system_index("saturn")].core == "mednafen_saturn", "Saturn must default to Beetle Saturn");
             for (const auto& [filename, system] : {std::pair{"game.mds", "saturn"}, {"game.iso", "saturn"},

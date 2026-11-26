@@ -12,7 +12,7 @@
 namespace
 {
 const std::vector<std::string> ids{"generic", "3ds", "wii", "dc",  "gb",     "gba", "gc",  "gg",   "nes",
-                                   "n64",     "nds", "md",  "sms", "saturn", "psp", "psx", "snes", "pce"};
+                                   "n64",     "nds", "md",  "sms", "saturn", "psp", "psx", "ps2", "snes", "pce"};
 std::string lower(std::string s)
 {
     for (char& c : s)
@@ -83,6 +83,11 @@ bool InputBindings::valid_system(const std::string& id)
 }
 std::string InputBindings::identify(const std::string& rom, const std::string& core)
 {
+    const auto core_name = lower(std::filesystem::path(core).stem().string());
+    if (core_name == "pcee2_libretro" || core_name == "armsx2_libretro")
+    {
+        return "ps2";
+    }
     auto ext = lower(std::filesystem::path(rom).extension().string());
     const std::vector<std::pair<std::string, std::string>> extensions{
         {".wbfs", "wii"},  {".wad", "wii"},  {".gdi", "dc"},   {".cdi", "dc"},   {".gb", "gb"},    {".gbc", "gb"},
@@ -144,7 +149,7 @@ void InputBindings::configure(const std::string& system, const std::filesystem::
     path = directory.empty() ? std::filesystem::path{} : directory / profile_name();
     bindings.clear();
     digital_stick = id != "generic" && id != "3ds" && id != "wii" && id != "dc" && id != "n64" && id != "gc" &&
-                    id != "psp" && id != "psx";
+                    id != "psp" && id != "psx" && id != "ps2";
     auto add = [&](int target, const std::string& name, SDL_GamepadButton pad, SDL_Scancode key)
     {
         bindings.push_back({target, name, (pad == SDL_GAMEPAD_BUTTON_INVALID) ? 0 : 1 + pad, key});
@@ -205,7 +210,7 @@ void InputBindings::configure(const std::string& system, const std::filesystem::
     }
     else
     {
-        const bool sony = id == "psx" || id == "psp";
+        const bool sony = id == "psx" || id == "ps2" || id == "psp";
         add(RETRO_DEVICE_ID_JOYPAD_A,
             sony          ? "Circle"
             : id == "pce" ? "I"
@@ -236,7 +241,7 @@ void InputBindings::configure(const std::string& system, const std::filesystem::
             add(RETRO_DEVICE_ID_JOYPAD_L, id == "pce" ? "V" : "L", SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, SDL_SCANCODE_Q);
             add(RETRO_DEVICE_ID_JOYPAD_R, id == "pce" ? "VI" : "R", SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, SDL_SCANCODE_E);
         }
-        if (id == "3ds" || id == "wii" || id == "gc" || id == "psx" || id == "generic")
+        if (id == "3ds" || id == "wii" || id == "gc" || id == "psx" || id == "ps2" || id == "generic")
         {
             axis_button(RETRO_DEVICE_ID_JOYPAD_L2,
                         id == "gc"    ? "L trigger"

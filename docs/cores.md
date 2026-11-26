@@ -1,12 +1,12 @@
 # Core builds
 
-[`cores.lock.json`](../cores.lock.json) pins the upstream revisions, archive checksums, licenses, and build options for all 14 catalog cores: Gambatte, mGBA, FCEUmm, bsnes, Mupen64Plus-Next, melonDS DS, BlastEm, Beetle PCE, SwanStation, Beetle Saturn, PPSSPP, Dolphin, Flycast, and Azahar. Builds use verified sources rather than moving branches or nightly binaries. Refer to the lockfile for exact versions.
+[`cores.lock.json`](../cores.lock.json) pins the upstream revisions, archive checksums, licenses, and build options for all 16 catalog cores: Gambatte, mGBA, FCEUmm, bsnes, Mupen64Plus-Next, melonDS DS, BlastEm, Beetle PCE, SwanStation, Beetle Saturn, PPSSPP, Dolphin, Flycast, Azahar, PCEE2, and ARMSX2. Builds use verified sources rather than moving branches or nightly binaries. Refer to the lockfile for exact versions.
 
 Home discovers cores from the installed bundle or its configured development bundle, defaulting to `build/cores/<architecture>/`. It does not implicitly use the unmanaged `cores/` directory or copy it during installation. Explicit custom core paths remain supported.
 
 ## Build requirements
 
-Requires Linux, Python 3.12+, CMake, Make, a C/C++ compiler, pkg-config, and NASM for x86 assembly. Azahar requires CMake 3.25+. Hardware cores also need target OpenGL/EGL/GLX and other system development libraries; the [CI workflow](../.github/workflows/cores.yml) lists native build packages. The [Debian build environment](building.md#debian-13-builds-with-docker) supplies a consistent release baseline.
+Requires Linux, Python 3.12+, CMake, Make, a C/C++ compiler, pkg-config, and NASM for x86 assembly. Azahar requires CMake 3.25+; the PS2 shader dependencies require CMake 3.22.1+. Hardware cores also need target OpenGL/EGL/GLX and other system development libraries; the [CI workflow](../.github/workflows/cores.yml) lists native build packages. The [Debian build environment](building.md#debian-13-builds-with-docker) supplies a consistent release baseline.
 
 Core dependencies and required submodules are pinned individually. Recipes use bundled static utility libraries where available, while runtime graphics/device interfaces remain system dependencies. PPSSPP uses its pinned FFmpeg archives for x86_64 and aarch64. No upstream source patches are applied.
 
@@ -43,7 +43,7 @@ Each successful core is published immediately. Rerunning the same command skips 
 
 `--rebuild` retains compiler intermediates; `--clean` starts selected cores from fresh source/build trees while keeping downloaded archives. Use `--clean` after editing cached sources or changing a compiler/sysroot in place. Failed rebuilds preserve the last published core. Bundle replacement is staged, recoverable, and serialized for builds sharing an output directory.
 
-Verification with `--core` checks only selected recipes. Full verification and installation require every locked core to be present and current. Recipe hashes prevent outdated cores from appearing current after a lockfile change. `--reuse DIRECTORY` can import verified per-core bundles from `DIRECTORY/NAME`, preserving provenance; it is unnecessary for ordinary build resumption.
+Verification with `--core` checks only selected recipes. Full verification and installation require every core supported by the target architecture to be present and current. Explicitly selecting a core for an unsupported architecture is rejected. Recipe hashes prevent outdated cores from appearing current after a lockfile change. `--reuse DIRECTORY` can import verified per-core bundles from `DIRECTORY/NAME`, preserving provenance; it is unnecessary for ordinary build resumption.
 
 ## Core-specific behavior
 
@@ -62,6 +62,18 @@ melonDS DS enables OpenGL classic/compute rendering and native JIT support on bo
 Azahar supports OpenGL and Vulkan with architecture-appropriate Dynarmic backends. Home opens `3ds`, `3dsx`, `cci`, `cxi`, `app`, `axf`, `elf`, `z3dsx`, `zcci`, and `zcxi` content directly by path. ZIP extraction is disabled for this system. Internal resolution is in Video; other advertised options are under Advanced → More Core options.
 
 Azahar's recipe writes upstream `GIT-COMMIT` and `GIT-TAG` metadata from the lockfile. The core embeds the commit in save-state headers and checks it when loading; keeping this metadata is required for state roundtrips. Bundled dependencies include shader tools, JIT support, and crypto/audio libraries; desktop frontends are disabled.
+
+### PlayStation 2
+
+PlayStation 2 uses [PCEE2](https://github.com/WizzardSK/pcee2-libretro) on x86_64 and [ARMSX2](https://github.com/ARMSX2/ARMSX2) on aarch64. Each bundle builds and verifies only its architecture's PS2 core. Disc images and ELF content load by path; ZIP extraction is disabled. The available extensions follow the selected core, including ISO, CHD, CSO, ZSO, and M3U on both architectures.
+
+Both cores default to Vulkan and use the PS2 controls profile, including both analog sticks, L2/R2 pressure, and L3/R3. Internal resolution is available in Video; other core options are under Advanced → More Core options.
+
+Place your PS2 BIOS dump in `~/.local/share/cabinet/system/pcsx2/bios/` (or `pcsx2/bios/` beneath an explicit `--system-dir`). BIOS files are not bundled. Copy the bundle's `system/pcsx2/resources/` into the corresponding writable system directory. Resources and their license notices come from the pinned core sources; no BIOS is included. These cores store native memory cards under `pcsx2/memcards/` in the system directory, so include that directory in save backups. Save states remain specific to the core and architecture.
+
+ARMSX2 requires Clang for its ARM64 calling conventions. Its recipe selects Clang and the aarch64 target for both the core and its dependencies; the Debian image includes the native Clang compiler alongside GCC’s target libraries.
+
+The recipes build pinned static SDL3, plutovg, plutosvg, and shaderc dependencies; PCEE2 also builds pinned rapidyaml and its nested dependencies. System development packages must provide PNG 1.6.40+, Zstd 1.5.5+, LZ4, WebP, FreeType 2.12+, libcurl, libpcap, fontconfig, and D-Bus. The Debian build image supplies these packages.
 
 ### Hardware renderers
 
@@ -87,7 +99,7 @@ Installation verifies the complete bundle against the checkout's lockfile and ta
 
 The bundle contains core libraries, dependency license notices, the exact lockfile, and a `manifest.json` recording source revisions, options, architecture, compiler/CMake details, builder/toolchain checksums, checkout revision/dirty status, and file SHA-256 checksums.
 
-Redistributable assets include `system/PPSSPP/` and `system/dolphin-emu/Sys/`; proprietary BIOS files are excluded. Standalone launches can use `--system-dir` pointing to the bundle's `system/`. Home uses its writable user system directory; copy the asset folders there for development.
+Redistributable assets include `system/PPSSPP/`, `system/dolphin-emu/Sys/`, and `system/pcsx2/resources/`; proprietary BIOS files are excluded. Standalone launches can use `--system-dir` pointing to the bundle's `system/`. Home uses its writable user system directory; copy the asset folders there for development.
 
 Source locks do not pin the whole compiler/runtime environment or promise byte-identical builds. Use the [Debian container and AppImage workflow](building.md) for releases, archive manifests/artifacts, and publish their checksums. The native x86-64/aarch64 CI artifacts are not automatically published releases.
 

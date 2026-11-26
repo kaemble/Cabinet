@@ -27,8 +27,9 @@ bool RunnerOptions::prefers_vulkan(std::string_view core_name) const
         return hardware_api == HardwareApi::Vulkan;
     }
     // Use the core's reported identity so custom filenames and Wii launches
-    // select the same default as Home's bundled Dolphin/Flycast cores.
-    return core_name == "dolphin-emu" || core_name == "Dolphin" || core_name == "dolphin" || core_name == "Flycast";
+    // select the same default as Home's bundled cores.
+    return core_name == "dolphin-emu" || core_name == "Dolphin" || core_name == "dolphin" || core_name == "Flycast" ||
+           core_name == "PCEE2" || core_name == "ARMSX2";
 }
 
 RunnerOptions parse_runner_options(int argc, char** argv)
@@ -360,7 +361,7 @@ Storage and firmware:
 
 Window, video, audio, and input:
   --system ID            3ds, dc, gb, gba, gc, wii, gg, nes, n64, nds, md, sms, saturn,
-                         psp, psx, snes, pce, or generic.
+                         psp, psx, ps2, snes, pce, or generic.
   --title TEXT           Window title. Default: ROM stem, or core name without content.
   --windowed             Start windowed, overriding this system's saved mode.
   --window-size WxH      Initial window size. Default: 640x576.

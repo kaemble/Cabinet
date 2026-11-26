@@ -64,6 +64,10 @@ inline std::string system_display_name(std::string_view id)
     {
         return "Sony PlayStation";
     }
+    if (id == "ps2")
+    {
+        return "Sony PlayStation 2";
+    }
     if (id == "snes")
     {
         return "Super Nintendo";
