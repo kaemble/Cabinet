@@ -783,7 +783,7 @@ std::vector<std::string> Home::modal_rows()
         std::vector<std::string> result{process.active() ? "Game running in another window" : "Play", "Edit details",
                                         (game() && game()->favorite) ? "Remove from favorites" : "Add to favorites",
                                         "Locate file", "Remove from library"};
-        if (game() && (game()->system == "psx" || game()->system == "saturn"))
+        if (game() && requires_bios(game()->system))
         {
             result.push_back("BIOS files");
         }
@@ -1261,7 +1261,7 @@ void Home::activate(bool with_controller)
         }
         else if (choice == ((editing || draft.system == "generic") ? 5 : 4) + (api_key.empty() ? 0 : 1))
         {
-            if (!editing && (draft.system == "psx" || draft.system == "saturn") &&
+            if (!editing && requires_bios(draft.system) &&
                 !has_bios(draft.system, fs::path(data_dir) / "system"))
             {
                 bios_system = draft.system;
@@ -1332,7 +1332,7 @@ void Home::activate(bool with_controller)
             modal = Modal::Remove;
             choice = 0;
         }
-        else if (choice == 5 && (game()->system == "psx" || game()->system == "saturn"))
+        else if (choice == 5 && requires_bios(game()->system))
         {
             bios_system = game()->system;
             bios_for_import = false;
@@ -2373,7 +2373,8 @@ void Home::draw_modal()
                         : (modal == Modal::Settings) ? "Home settings"
                         : (modal == Modal::ApiKey) ? "SteamGridDB API key"
                         : (modal == Modal::SteamGrid) ? "Find SteamGridDB box art"
-                        : (modal == Modal::Bios) ? (bios_system == "psx" ? "PlayStation BIOS" : "Sega Saturn BIOS")
+                        : (modal == Modal::Bios) ? (bios_system == "psx" ? "PlayStation BIOS"
+                                                   : bios_system == "ps2" ? "PlayStation 2 BIOS" : "Sega Saturn BIOS")
                         : (modal == Modal::Browse)
                             ? ((purpose == BrowsePurpose::Archive) ? "Choose a ROM inside the ZIP"
                                : (purpose == BrowsePurpose::Bios)  ? "Choose a BIOS file"
@@ -2446,6 +2447,7 @@ void Home::draw_modal()
              16);
         line(107,
              bios_system == "psx" ? "Select an unmodified PlayStation BIOS (512 KiB)."
+             : bios_system == "ps2" ? "Select a complete PS2 BIOS dump (4–8 MiB)."
                                   : "Select sega_101.bin (Japan) or mpr-17933.bin (US/Europe).",
              14, muted);
         line(136, "The BIOS is checked and copied to Cabinet's system folder.", 14, muted);

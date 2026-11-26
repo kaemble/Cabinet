@@ -3,6 +3,7 @@
 #include <fstream>
 #include <sqlite3.h>
 #include "archive_fixture.h"
+#include "firmware_fixture.h"
 #include "virtual_gamepad.h"
 static void require(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
 static void key(Home& home, SDL_Scancode code, SDL_Keymod mod = SDL_KMOD_NONE) {
@@ -350,9 +351,9 @@ int main(int argc, char** argv) {
                     "Favorite, edit, import, duplicate import and removal must not reload the full library");
         }
         SDL_SetWindowSize(window, 1200, 800);
-        for (const std::string system : {"psx", "saturn"}) {
+        for (const std::string system : {"psx", "ps2", "saturn"}) {
             const auto profile = dir / ("bios-" + system); fs::create_directories(profile);
-            const auto image = profile / "game.cue"; std::ofstream(image) << "fixture";
+            const auto image = profile / (system == "ps2" ? "game.iso" : "game.cue"); std::ofstream(image) << "fixture";
             Home home(window, renderer, profile, "/unused");
             home.select_system(system);
             home.import_file(image);
@@ -371,10 +372,48 @@ int main(int argc, char** argv) {
             key(home, SDL_SCANCODE_RETURN); home.draw();
             key(home, SDL_SCANCODE_ESCAPE);
             const auto invalid = profile / "fake-bios.bin";
-            { std::ofstream file(invalid, std::ios::binary); std::string zeros(512 * 1024, 0); file.write(zeros.data(), zeros.size()); }
+            { std::ofstream file(invalid, std::ios::binary); std::string zeros(system == "ps2" ? 4 * 1024 * 1024 : 512 * 1024, 0); file.write(zeros.data(), zeros.size()); }
             bool rejected = false;
             try { install_bios(system, invalid, profile / "system"); } catch (const std::exception&) { rejected = true; }
-            require(rejected && !has_bios(system, profile / "system"), "Random 512 KiB file accepted as a BIOS");
+            require(rejected && !has_bios(system, profile / "system"), "Random file accepted as a BIOS");
+        }
+        {
+            const auto profile = dir / "ps2-bios-install", content = profile / "content";
+            fs::create_directories(content);
+            firmware_fixture::write(content / "A-bios.bin", firmware_fixture::ps2());
+            const auto image = content / "B-game.iso";
+            std::ofstream(image) << "PS2 game fixture";
+            Home home(window, renderer, profile, "/unused");
+            home.select_system("ps2");
+            home.import_file(image);
+            for (int i = 0; i < 4; ++i) key(home, SDL_SCANCODE_DOWN);
+            key(home, SDL_SCANCODE_RETURN);
+            Library inspect(profile / "library.sqlite3");
+            require(inspect.games().empty(), "Missing PS2 BIOS did not prompt before import");
+            auto choose_bios = [&]
+            {
+                key(home, SDL_SCANCODE_RETURN);
+                for (int i = 0; i < 100; ++i) { home.tick(); SDL_Delay(1); }
+                key(home, SDL_SCANCODE_DOWN);
+                key(home, SDL_SCANCODE_RETURN);
+                home.draw();
+            };
+            choose_bios();
+            require(has_bios("ps2", profile / "system") && inspect.games().empty(),
+                    "Selecting a PS2 BIOS did not install it before continuing import");
+            key(home, SDL_SCANCODE_RETURN);
+            require(inspect.games().size() == 1, "Continuing after PS2 BIOS setup did not import the game");
+            for (int i = 0; i < 5; ++i) key(home, SDL_SCANCODE_DOWN);
+            key(home, SDL_SCANCODE_RETURN);
+            choose_bios();
+            key(home, SDL_SCANCODE_RETURN);
+            key(home, SDL_SCANCODE_ESCAPE);
+            const auto next = content / "C-next.iso";
+            std::ofstream(next) << "another PS2 game";
+            home.import_file(next);
+            for (int i = 0; i < 4; ++i) key(home, SDL_SCANCODE_DOWN);
+            key(home, SDL_SCANCODE_RETURN);
+            require(inspect.games().size() == 2, "An installed PS2 BIOS did not bypass setup on the next import");
         }
         {
             const auto profile = dir / "zip-ui";
