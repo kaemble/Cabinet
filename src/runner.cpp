@@ -616,8 +616,18 @@ static void set_fast_forward(Session& s, bool enabled)
 }
 static void audio_sample(std::int16_t left, std::int16_t right)
 {
-    const std::int16_t samples[] = {left, right};
-    audio_batch(samples, 1);
+    if (!current->output_enabled || current->runahead.state_operation)
+    {
+        return;
+    }
+    try
+    {
+        current->audio.submit_sample(left, right, current->fast_forward);
+    }
+    catch (const std::exception& error)
+    {
+        current->callback_error = error.what();
+    }
 }
 static void input_poll()
 {
@@ -811,7 +821,7 @@ static void run_core_frame(Session& session, bool core_has_run)
                 const auto duration = static_cast<retro_usec_t>(std::llround(1000000.0 / session.frame_rate));
                 session.frame_time.callback(session.frame_time.reference > 0 ? session.frame_time.reference : duration);
             }
-            session.core.api.run();
+            session.audio.collect_samples(session.core.api.run);
             if (!speculative)
             {
                 restore_execution.retained_format = session.format;

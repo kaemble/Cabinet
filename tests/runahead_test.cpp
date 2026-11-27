@@ -90,8 +90,7 @@ int main()
                 }
                 const std::uint32_t pixel = static_cast<std::uint32_t>(value);
                 video(duplicate && current->speculative ? nullptr : &pixel, 1, 1, sizeof(pixel));
-                const std::int16_t samples[]{0, 0};
-                require(audio_batch(samples, 1) == 1, "Muted audio was not consumed");
+                audio_sample(0, 0);
                 if (current->output_enabled)
                 {
                     displayed = pixel;

@@ -70,7 +70,7 @@ void AsyncAudio::pump(AudioOutput& output, std::uint64_t now)
     for (unsigned count = 0; count < 4096 && !pending && output.queue_ms() < target_ms; ++count)
     {
         const auto before = output.produced_ms();
-        callbacks.callback();
+        output.collect_samples(callbacks.callback);
         if (output.produced_ms() <= before)
         {
             break;

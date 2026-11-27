@@ -60,6 +60,7 @@ void AudioOutput::close()
         SDL_DestroyAudioStream(stream_);
     }
     stream_ = nullptr;
+    sample_count_ = 0;
     applied_volume_ = -1;
     started_ = throttled_ = false;
     produced_ms_ = 0;
@@ -67,6 +68,7 @@ void AudioOutput::close()
 
 void AudioOutput::set_sample_rate(double sample_rate)
 {
+    flush_samples();
     if (sample_rate == 0)
     {
         close(); // Silent cores, such as 2048, have no audio stream.
@@ -102,6 +104,23 @@ bool AudioOutput::device_format(SDL_AudioSpec& spec, int& frames) const
 
 std::size_t AudioOutput::submit(const std::int16_t* samples, std::size_t frames, bool fast_forward)
 {
+    // Preserve order when a core mixes the two libretro callbacks.
+    flush_samples();
+    write_batch(samples, frames, fast_forward);
+    return frames;
+}
+
+void AudioOutput::flush_samples()
+{
+    if (sample_count_)
+    {
+        const auto frames = std::exchange(sample_count_, 0) / 2;
+        write_batch(samples_.data(), frames, false);
+    }
+}
+
+void AudioOutput::write_batch(const std::int16_t* samples, std::size_t frames, bool fast_forward)
+{
     // Pace the producer in the main loop instead of dropping batches when
     // the core advances more than one display interval in retro_run().
     if (stream_ && !fast_forward)
@@ -112,7 +131,6 @@ std::size_t AudioOutput::submit(const std::int16_t* samples, std::size_t frames,
     {
         produced_ms_ += frames * 1000.0 / sample_rate_;
     }
-    return frames;
 }
 
 int AudioOutput::queued_bytes() const
@@ -159,6 +177,7 @@ bool AudioOutput::ready(double frame_rate, bool fast_forward)
 
 void AudioOutput::reset(bool pause_device)
 {
+    sample_count_ = 0;
     if (stream_)
     {
         SDL_ClearAudioStream(stream_);

@@ -9,7 +9,7 @@
 
 static AsyncAudio* source;
 static AudioOutput* output;
-static unsigned calls = 0, replacement_calls = 0;
+static unsigned calls = 0, replacement_calls = 0, scalar_calls = 0;
 static bool produce = true, remove_during_callback = false;
 static unsigned batch_frames = 480;
 static std::vector<bool> states, replacement_states;
@@ -104,6 +104,42 @@ int main()
             notifications.set_enabled(true);
             notifications.clear();
             require(states.back() == false && !notifications.registered(), "Shutdown left an active callback");
+        }
+        {
+            SDL_AudioSpec format{SDL_AUDIO_S16, 2, 48000};
+            auto* stream = SDL_CreateAudioStream(&format, &format);
+            require(stream, SDL_GetError());
+            AudioOutput audio(stream);
+            audio.set_sample_rate(48000);
+            output = &audio;
+            AsyncAudio notifications;
+            notifications.configure({[]
+            {
+                const auto sample = static_cast<std::int16_t>(++scalar_calls);
+                output->submit_sample(sample, -sample, false);
+                const std::int16_t pair[]{sample, sample};
+                output->submit(pair, 1, false);
+                for (int i = 0; i < 1025; ++i)
+                {
+                    output->submit_sample(-sample, sample, false);
+                }
+            }, nullptr});
+            notifications.set_enabled(true);
+            notifications.pump(audio, notifications.next_wake());
+            require(scalar_calls == 3, "Callback audio did not count buffered samples toward the queue target");
+            std::vector<std::int16_t> actual(scalar_calls * 1027 * 2);
+            const auto bytes = static_cast<int>(actual.size() * sizeof(actual[0]));
+            require(SDL_GetAudioStreamData(stream, actual.data(), bytes) == bytes, "Buffered callback samples were lost");
+            auto value = actual.begin();
+            for (std::int16_t sample = 1; sample <= static_cast<int>(scalar_calls); ++sample)
+            {
+                require(*value++ == sample && *value++ == -sample, "Scalar audio did not precede batch audio");
+                require(*value++ == sample && *value++ == sample, "Batch audio was reordered");
+                for (int i = 0; i < 1025; ++i)
+                {
+                    require(*value++ == -sample && *value++ == sample, "Scalar audio changed across a buffer flush");
+                }
+            }
         }
         SDL_Quit();
         std::cout << "Callback audio demand, lifecycle, replacement and empty/tiny batches passed\n";
