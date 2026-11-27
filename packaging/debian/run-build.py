@@ -51,8 +51,9 @@ def main():
             run("python3", "packaging/debian/verify-runtime.py", out / "cabinet/cabinet", out / "cabinet/cabinet-runner")
     elif args.target != "sdl":
         selected = [] if args.target == "cores" else ["--core", args.target]
+        strip = "aarch64-linux-gnu-strip" if cross else "strip"
         run("python3", "tools/build_cores.py", "--arch", arch, "--output", out / "cores",
-            "--work-dir", out / "core-work", "--jobs", args.jobs, *toolchain, *selected)
+            "--work-dir", out / "core-work", "--jobs", args.jobs, "--strip", strip, *toolchain, *selected)
         run("python3", "tools/build_cores.py", "--verify", "--arch", arch,
             "--output", out / "cores", *selected)
 

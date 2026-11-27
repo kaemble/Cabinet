@@ -79,6 +79,8 @@ ArmadaOS cross-builds compile Cabinet, static SDL, and the cores with `-O3 -marc
 
 `cabinet` builds the pinned static SDL first, then `cabinet` and `cabinet-runner` in Release mode with tests disabled. It does not build cores. `sdl` builds only SDL. `cores` builds the complete locked bundle; any core name shown by `--help` builds just that core, preserving other completed cores in the bundle. A core-only build does not build SDL. The existing core builder verifies the bundle's checksums and ELF architecture. Native Cabinet builds also run the Debian runtime dependency verifier. Cross-built executables need runtime verification on Debian 13 ARM64; `ldd` on the x86 build host cannot validate them.
 
+Docker core builds strip staged binaries with the target architecture's `strip --strip-unneeded` before recording bundle checksums, reducing the size of the packaged AppImage. Compiler outputs in the work directory remain intact. Rerunning a core build also strips already completed cores in the selection without recompiling them.
+
 Outputs and resumable work directories are under `release/docker/PRESET/IMAGE_ID/`. The script prints the exact path after a successful build. That directory contains:
 
 - `cabinet/cabinet` and `cabinet/cabinet-runner` (frontend build).

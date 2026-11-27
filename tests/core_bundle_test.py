@@ -21,6 +21,53 @@ spec.loader.exec_module(cores)
 
 
 class BundleTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("cc") and shutil.which("strip"), "requires cc and strip")
+    def test_stripping_preserves_exports_checksums_and_compiler_outputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            arch = cores.architecture(platform.machine())
+            lock = cores.load_lock(ROOT / "cores.lock.json")
+            lock["cores"] = {"mgba": lock["cores"]["mgba"]}
+            lock_path = root / "lock.json"
+            lock_path.write_text(json.dumps(lock))
+            source = root / "probe.c"
+            source.write_text("int retro_api_version(void) { return 1; }\n")
+            artifact = root / "probe.so"
+            cores.subprocess.run(["cc", "-shared", "-fPIC", "-g", str(source), "-o", str(artifact)], check=True)
+            original = artifact.read_bytes()
+            output = root / "output"
+            base = ["build_cores.py", "--arch", arch, "--lock", str(lock_path),
+                    "--output", str(output), "--work-dir", str(root / "work"), "--offline"]
+
+            def build(name, recipe, arch, toolchain, compilers, cache, tree, stage, jobs, offline):
+                shutil.copy2(artifact, stage / recipe["artifact"])
+                return {}
+
+            def invoke(*extra):
+                with mock.patch.object(sys, "argv", base + list(extra)):
+                    cores.main()
+
+            with mock.patch.object(cores, "build_core", side_effect=build) as compile_core:
+                invoke()
+                binary = output / lock["cores"]["mgba"]["artifact"]
+                self.assertEqual(binary.read_bytes(), original)
+                invoke("--strip", "strip")
+                self.assertLess(binary.stat().st_size, len(original))
+                self.assertEqual(artifact.read_bytes(), original)
+                manifest = cores.verify(output, lock_path, arch)
+                self.assertEqual(manifest["cores"]["mgba"]["files"][binary.name], cores.digest(binary))
+                self.assertEqual(ctypes.CDLL(str(binary)).retro_api_version(), 1)
+                invoke("--strip", "strip", "--rebuild")
+                self.assertLess(binary.stat().st_size, len(original))
+                cores.verify(output, lock_path, arch)
+                invoke("--strip", "strip")
+                self.assertEqual(compile_core.call_count, 2)
+                snapshot = {p.relative_to(output): p.read_bytes() for p in output.rglob("*") if p.is_file()}
+                with mock.patch.object(cores, "run", side_effect=cores.subprocess.CalledProcessError(1, "strip")):
+                    with self.assertRaises(cores.subprocess.CalledProcessError):
+                        invoke("--strip", "strip")
+                self.assertEqual(snapshot, {p.relative_to(output): p.read_bytes() for p in output.rglob("*") if p.is_file()})
+
     @unittest.skipUnless(shutil.which("aarch64-linux-gnu-gcc"), "requires the aarch64 cross compiler")
     def test_armada_toolchain_optimizes_cmake_and_make_cores(self):
         toolchain = ROOT / "packaging/debian/armadaos.cmake"

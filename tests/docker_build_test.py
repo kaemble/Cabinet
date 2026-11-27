@@ -231,6 +231,7 @@ class ContainerDispatchTest(unittest.TestCase):
         compile_command, verify = self.invoke("aarch64", "mgba")
         self.assertIn("tools/build_cores.py", compile_command)
         self.assertIn("/opt/cabinet/aarch64.cmake", compile_command)
+        self.assertEqual(compile_command[compile_command.index("--strip") + 1], "aarch64-linux-gnu-strip")
         self.assertEqual(compile_command[-2:], ["--core", "mgba"])
         self.assertIn("--verify", verify)
         self.assertEqual(verify[-2:], ["--core", "mgba"])
@@ -238,12 +239,21 @@ class ContainerDispatchTest(unittest.TestCase):
     def test_all_cores(self):
         compile_command, verify = self.invoke("x86_64", "cores")
         self.assertNotIn("--core", compile_command)
+        self.assertEqual(compile_command[compile_command.index("--strip") + 1], "strip")
         self.assertNotIn("--core", verify)
 
     def test_armada_cross_cores_use_optimized_toolchain(self):
         for target in ("cores", "mgba", "gambatte"):
             compile_command, verify = self.invoke("ArmadaOS", target)
             self.assertIn("/opt/cabinet/armadaos.cmake", compile_command)
+            self.assertEqual(compile_command[compile_command.index("--strip") + 1], "aarch64-linux-gnu-strip")
+            self.assertIn("--verify", verify)
+
+    def test_native_arm_cores_use_native_strip(self):
+        for preset in ("aarch64", "ArmadaOS"):
+            compile_command, verify = self.invoke(preset, "cores", "aarch64")
+            self.assertEqual(compile_command[compile_command.index("--strip") + 1], "strip")
+            self.assertNotIn("--toolchain", compile_command)
             self.assertIn("--verify", verify)
 
     def test_native_armada_does_not_use_cross_toolchain(self):

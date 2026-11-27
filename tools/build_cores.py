@@ -441,7 +441,8 @@ def build_bundle(args, output):
     for name in names:
         core = lock["cores"][name]
         prior = current["cores"].get(name) if current else None
-        if not args.rebuild and not args.clean and prior and prior["recipe_sha256"] == recipe_digest(core) and prior["toolchain_sha256"] == toolchain_sha:
+        up_to_date = not args.rebuild and not args.clean and prior and prior["recipe_sha256"] == recipe_digest(core) and prior["toolchain_sha256"] == toolchain_sha
+        if up_to_date and not args.strip:
             print(f"Already built and verified {name} for {args.arch}", flush=True)
             continue
         inputs = {"recipe": core, "arch": args.arch, "toolchain": toolchain_sha,
@@ -456,7 +457,12 @@ def build_bundle(args, output):
         print(f"Build files: {tree}", flush=True)
         with tempfile.TemporaryDirectory(prefix=f"{name}-stage-", dir=output.parent) as stage_dir:
             stage = Path(stage_dir)
-            receipt = reuse_core(args.reuse / name, name, core, args.arch, toolchain, stage) if args.reuse and not args.clean and not args.rebuild else None
+            reuse = None
+            if up_to_date:
+                reuse = output
+            elif args.reuse and not args.clean and not args.rebuild:
+                reuse = args.reuse / name
+            receipt = reuse_core(reuse, name, core, args.arch, toolchain, stage) if reuse else None
             try:
                 if not receipt:
                     if core.get("build_system") == "make" and compilers is None:
@@ -464,6 +470,9 @@ def build_bundle(args, output):
                             compilers = make_compilers(toolchain, Path(probe))
                     receipt = build_core(name, core, args.arch, toolchain, compilers or {}, cache,
                                          tree, stage, args.jobs, args.offline)
+                if args.strip:
+                    run([args.strip, "--strip-unneeded", stage / core["artifact"]], tree)
+                    elf_check(stage / core["artifact"], args.arch)
                 receipt.update(artifact=core["artifact"], recipe_sha256=recipe_digest(core), toolchain_sha256=toolchain_sha)
                 publish_core(output, name, receipt, stage, lock_bytes, args.arch, provenance)
                 current = read_bundle(output, args.arch)
@@ -488,6 +497,7 @@ def main():
     parser.add_argument("--work-dir", type=Path, default=ROOT / "build/core-work")
     parser.add_argument("--output", type=Path, help="Default: build/cores/ARCH")
     parser.add_argument("--toolchain", type=Path, help="CMake toolchain; required when cross-compiling")
+    parser.add_argument("--strip", metavar="TOOL", help="Strip staged core binaries with TOOL before recording checksums")
     parser.add_argument("--jobs", type=int, default=os.cpu_count() or 1)
     parser.add_argument("--offline", action="store_true", help="Require cached source archives")
     parser.add_argument("--reuse", type=Path, help="Reuse verified per-core bundles from DIRECTORY/NAME when their recipes and toolchains match")
