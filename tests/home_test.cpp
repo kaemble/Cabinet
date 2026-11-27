@@ -1,5 +1,8 @@
 // Exercise the actual UI event handlers and drawing against a temporary library.
-#include "../src/home.cpp"
+#include "home_window.h"
+#include "firmware.h"
+#include "save_storage.h"
+#include <iostream>
 #include <fstream>
 #include <sqlite3.h>
 #include "archive_fixture.h"
@@ -607,7 +610,7 @@ int main(int argc, char** argv) {
                 SDL_Color color{};
                 require(SDL_ReadSurfacePixel(screen, x, static_cast<int>(y),
                                              &color.r, &color.g, &color.b, &color.a), SDL_GetError());
-                highlighted = highlighted || (color.r == accent.r && color.g == accent.g && color.b == accent.b);
+                highlighted = highlighted || (color.r == Home::accent.r && color.g == Home::accent.g && color.b == Home::accent.b);
             }
             require(highlighted, "A short selection at the end of a long field must remain visible");
             require(screen && SDL_SaveBMP(screen, (dir / "text-cursor-search.bmp").c_str()), SDL_GetError());

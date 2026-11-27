@@ -1,4 +1,6 @@
-#include "../src/home.cpp"
+#include "home_window.h"
+#include "save_storage.h"
+#include <iostream>
 #include "virtual_gamepad.h"
 #include <fstream>
 #include <sstream>
