@@ -4,23 +4,23 @@
 
 Press **Start** on a controller, **Esc** on the keyboard, or click **Menu** in the bottom bar to open Home's menu. It contains **Add custom entry**, **Settings**, **Close Cabinet**, and **SteamGridDB API key**. Close the running game before closing Cabinet.
 
-**Add custom entry** asks for a core first. Select the **ROM** row to choose a file of any type, or leave it skipped and choose **Add to library** for a contentless core (`supports_no_game = "true"`). The runner checks that the core supports running without content. Custom entries use the generic system and appear under **Others** in the sidebar; that tab is hidden when there are no custom entries. ZIP files added this way are passed directly to the selected core without extraction. The core must support the chosen file.
+**Add custom entry** opens the core picker first. Select **ROM** to choose content, or skip it for a core that supports running without content. Custom entries appear under **Others** and pass ZIP files directly to the selected core.
 
-**Settings** saves Home's confirm/cancel swap and dual-screen preferences in `home.conf` under the data directory. Swapping exchanges the controller's south/east actions in Home and adds `--swap-confirm-cancel` to runner launches. Enabling dual-screen adds `--dual-screen`, which the runner applies to DS/3DS games. Keyboard Enter/Escape retain their usual actions. `CABINET_DUAL_SCREEN=1` also continues to enable dual-screen launches.
+**Settings** saves Home's confirm/cancel swap and dual-screen preferences in `home.conf`. The swap exchanges the controller's south/east actions in Home and the runner. Dual-screen applies to DS/3DS and can also be enabled with `CABINET_DUAL_SCREEN=1`.
 
 Select a system in the sidebar, then choose **Add game** or press **I**. Dragging files onto Home also opens import review and requires a selected system. Review the title, system, and core before choosing **Add to library**; the selected system's bundled core is the default, and a custom core can be selected.
 
 Open a game's details to play, edit its title or core, mark it as a favorite, locate a moved file, or remove it. Removal leaves ROMs and saves untouched. Locate file preserves the game's identity and metadata. Importing an existing canonical path selects its entry; same-named files in different folders remain separate games.
 
-Choose **Edit details → Box art: choose image** to select a PNG, JPEG, or BMP cover. The editor previews the image; **Save changes** replaces the library placeholder or previous cover. Cancelling discards the selection. Cabinet stores its own PNG copy under `~/.local/share/cabinet/boxart/<game identity>.png`, preserving the aspect ratio and limiting the longest side to 1024 pixels. Moving or deleting the source image does not affect the saved cover. Title edits and ROM relocation keep the same art.
+In **Edit details**, use **Box art: choose image** to preview a PNG, JPEG, or BMP cover, then select **Save changes**. Cabinet stores a PNG copy with a maximum side of 1024 pixels. The copy stays with the entry when you rename the game or move its ROM.
 
 Choose **Menu → SteamGridDB API key** to save, replace, or remove your [SteamGridDB API key](https://www.steamgriddb.com/profile/preferences/api). Cabinet stores it locally in `steamgriddb/key.conf` under the data directory, inside a directory accessible only to your user account. The key is masked in the menu and is sent only to the API, never to artwork downloads.
 
-With a key configured, importing a game automatically searches SteamGridDB using the game title (the selected ROM member's title for ZIP files). Cabinet prefers an exact title match, otherwise the first search result. It requests static PNG/JPEG grids in this order: **Alternate** square grids (512×512 or 1024×1024), other square grids, then other dimensions. Downloaded art is previewed and saved with **Add to library**. A failed lookup leaves the import available without artwork; selecting the loading SteamGridDB row cancels the lookup. Duplicate imports preserve existing art.
+With a key configured, Home searches during import using the game title or selected ZIP member. It prefers an exact title match and square artwork, with Alternate square grids first. Save the preview with **Add to library**. Select the loading SteamGridDB row to cancel a lookup. Failed or cancelled lookups leave the import available, and duplicate imports keep their artwork.
 
 The **SteamGridDB: find box art** row in import review and Edit details searches with the current title. You can edit the search query and choose a matching game. The preferred cover is staged until you save; cancelling the editor discards it. Existing games can still use the local image chooser.
 
-The sidebar includes system counts, All games, Favorites, and Recently played. Search with **F** or the search box; Enter/Escape finishes entry. Search and title fields support a movable cursor: Left/Right and Home/End move it, Shift selects text, and Ctrl+Left/Right moves by word. Backspace/Delete remove text around the cursor; holding Ctrl deletes a word. Ctrl+A selects all, and Ctrl+C/X/V copy, cut, and paste. Click to position the cursor or drag to select; long fields scroll to keep the cursor visible. The view button switches grid/list views. Games without box art use placeholders, and view/search choices last for the session.
+The sidebar shows system counts and filters for All games, Favorites, and Recently played. Use **F** or the search box to search, and the view button to switch between grid and list. View and search choices last for the session.
 
 Arrows, D-pad, or left stick move focus; Enter/south selects, Escape/east goes back, and Tab switches panes. Right from the sidebar enters the grid, and Up from its first row reaches the toolbar. The layout and file browser adapt to the window size.
 
@@ -38,11 +38,11 @@ Encrypted archives, unsafe or duplicate member names, corrupt data, nested ZIPs,
 
 Place firmware under `~/.local/share/cabinet/system/`, or `DIR/system/` with `--data-dir DIR`. Home prompts for a compatible BIOS when importing PlayStation (PS1), PlayStation 2, or Saturn content; setup can be skipped or reopened through **BIOS files** in game details. PS1 and Saturn images are checked against known 512 KiB BIOS checksums. PS2 dumps (4–8 MiB) are checked for a valid ROM directory and console version metadata, then copied into `system/pcsx2/bios/` with a stable checksum-based filename. Existing PS2 dumps in that folder are also detected. Proprietary BIOS files are never downloaded or bundled.
 
-The verified core bundle includes redistributable PPSSPP and Dolphin assets. For development, copy `system/PPSSPP/` and `system/dolphin-emu/` from the bundle into Home's system directory. AppImage setup is described in [building and packaging](building.md).
+For development, copy the bundled `system/PPSSPP/`, `system/dolphin-emu/`, and `system/pcsx2/resources/` folders into Home's system directory. See [building and packaging](building.md) for AppImage setup.
 
 For Dreamcast, import a `.cue` or `.gdi` descriptor with its referenced tracks kept together; `.cdi`, `.chd`, and `.m3u` are also recognized. Flycast supports an HLE BIOS; an optional original BIOS belongs at `system/dc/dc_boot.bin`. It defaults to per-game VMU cards. Nintendo 3DS content opens directly by path and does not support ZIP imports.
 
-PlayStation 2 uses PCEE2 on x86_64 and ARMSX2 on aarch64. Use **BIOS files** in game details to install a BIOS, and copy the bundled `system/pcsx2/resources/` into Cabinet’s system directory. See [core builds](cores.md#playstation-2) for formats, dependencies, and native memory-card storage.
+See [core builds](cores.md#playstation-2) for PlayStation 2 formats, architecture-specific cores, and memory-card locations.
 
 ## Launch options and logging
 

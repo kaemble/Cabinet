@@ -36,9 +36,9 @@ Digital systems also bind the left stick to D-pad directions. Analog sticks pres
 
 **Escape** or **Start + Select/View** pauses gameplay and audio and opens the menu. Start and Select respond individually before the chord completes. **Interface → Menu shortcut** can instead select L3 + R3 or Home/Guide; the OS may intercept Home/Guide. Home shows a startup shortcut reminder for the first three successful controller launches; standalone callers can request it with `--show-menu-hint`.
 
-Navigate with arrows, D-pad, or left stick. Enter/south confirms, Escape/east goes back, and X/Z also work. **Interface → Swap confirm/cancel** reverses the gamepad menu buttons. Mouse movement highlights rows, left-click activates on release, and the wheel navigates lists. Bottom-bar prompts are clickable. Held controls must be released after entering/leaving the menu before affecting gameplay.
+Navigate with arrows, D-pad, or left stick. Enter, X, or south confirms. Escape, Z, or east goes back. **Interface → Swap confirm/cancel** reverses the gamepad buttons. Menus also support the mouse, including bottom-bar prompts. Release held controls after opening or closing a menu before using them in gameplay.
 
-The menu offers Resume, Save state, Load state, Restart game, Quit, Configuration, and Interface. Save/load uses one slot per game and core binary. State actions resume on success and keep the menu open on failure. Restart reinitializes the core and content. Restart and Quit require confirmation; **Interface → Confirm state actions** controls load/overwrite confirmation for menus and hotkeys and defaults on. A first save needs no confirmation.
+Save and load use one slot per game and core binary. Success resumes play and failure leaves the menu open. Restart reinitializes the core and content. Restart and Quit require confirmation. **Interface → Confirm state actions** defaults on and applies to loads and overwrites from both menus and hotkeys.
 
 **Configuration → Input → Hotkeys** edits Save state, Load state, and Fast forward bindings. Gamepad hotkeys start unbound. Save/load act once per press; fast-forward is held and mutes audio. `--fast-forward` keeps it enabled independently of the hotkey.
 

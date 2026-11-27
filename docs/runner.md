@@ -12,7 +12,7 @@
   --windowed --window-size 800x600 --scale nearest --volume 80
 ```
 
-`--core PATH` is required, and content must use `--rom PATH` rather than a positional argument. Omit `--rom` only for cores advertising contentless support. Such sessions use the core name as the default window title and `Generic/core-<core filename stem>/` for saves and states. Home requires game content.
+Supply `--core PATH` and `--rom PATH`. For cores that support contentless sessions, omit `--rom` in a standalone launch or use **Add custom entry** in [Home](library.md#import-and-organize). Standalone contentless sessions default to the core name for the title and `Generic/core-<core filename stem>/` for saves and states.
 
 `--system ID` selects an input/settings profile; otherwise the runner infers one from the ROM/core. Use `--system wii` for Wii content with shared disc extensions such as ISO or RVZ. `--help` lists supported IDs and all options.
 
@@ -39,7 +39,7 @@ Explicit command-line settings override saved preferences. See [controls](contro
 
 ## Audio callbacks
 
-The runner supports libretro's optional `RETRO_ENVIRONMENT_SET_AUDIO_CALLBACK` interface. It requests samples according to playback-buffer demand, with timed service between video frames. Audio notifications and other core calls run serially on the runner thread. Callback audio uses a 60 ms queue target and SDL's sample-rate conversion, without the queue-feedback speed correction used for frame-based audio.
+The runner services libretro's optional `RETRO_ENVIRONMENT_SET_AUDIO_CALLBACK` on the runner thread, including between video frames. SDL converts the sample rate, and the runner targets a 60 ms queue.
 
 The producer is inactive while paused, fast-forwarding, or running without an audio device, and is stopped before save/load operations and core shutdown. Frontend run-ahead is unavailable for cores using callback audio.
 
@@ -49,4 +49,4 @@ For melonDS DS (`--system nds`) and Azahar (`--system 3ds`), `--dual-screen` pla
 
 Either window can retain gameplay focus. Closing either opens quit confirmation. Scaling and aspect settings apply to both views, and touch follows the bottom view with captured drags clamped to its edges. The mode temporarily fixes the core to a top/bottom layout with swapping disabled; saved layout preferences remain available without the flag.
 
-Set `CABINET_DUAL_SCREEN=1` before launching Home to append the flag to its runner launches. Other values leave it disabled. Armada Game Mode uses a direct bottom-panel lease when built with `-DCABINET_ARMADA_DRM=ON`; see [Armada dual-screen output](armada-dual-screen.md).
+Enable dual-screen in Home's **Settings** or set `CABINET_DUAL_SCREEN=1` to pass the flag to runner launches. Builds with `-DCABINET_ARMADA_DRM=ON` can lease the bottom panel directly in Armada Game Mode. See [Armada dual-screen output](armada-dual-screen.md).

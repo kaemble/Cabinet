@@ -17,7 +17,7 @@
 
 ## Identity and layout
 
-Library games have permanent random 128-bit IDs. Their readable save-folder names derive from the original ROM filename, are sanitized and limited to 160 UTF-8 bytes, and receive an identity suffix on collisions. Title edits and ROM relocation preserve the ID and folder. Removed folders stay reserved to protect leftover saves.
+Library games have permanent IDs and save folders named after their ROMs. Title edits and ROM relocation preserve both. Removing a game reserves its folder so another entry cannot claim its saves.
 
 ```text
 ~/.local/share/cabinet/
@@ -35,11 +35,11 @@ Core-managed files retain their native structure, such as Flycast VMU files. Fly
 
 Home passes `--game-id ID --save-name NAME` to the runner. Standalone launches can supply the same values. Without `--save-name`, the ID names the folder. Without `--game-id`, identity falls back to a content hash or canonical-path hash under `Generic`, even with `--system`; moving path-identified content changes that identity.
 
-Plain-text manifests record identity, title, content basename, system, core version, and core fingerprint. State sidecars also record timestamps. Fingerprints are FNV-1a compatibility identifiers, not security checks. Disc images are not read in full solely for metadata.
+Plain-text manifests record game identity, title, content basename, system, core version, and the core's FNV-1a compatibility fingerprint. State sidecars also record timestamps.
 
 ## Persistence and recovery
 
-Battery RAM and RTC load automatically and save every ten seconds and on exit. Incompatible save sizes cause a launch error. Writes use temporary files followed by rename; unchanged data is not rewritten. Abrupt termination can lose progress since the last checkpoint. Loading a state also changes the battery memory saved afterward.
+Battery RAM and RTC load at startup and save on change every ten seconds and on exit. Writes use temporary files followed by rename. Incompatible save sizes cause a launch error. Loading a state also changes the battery memory saved afterward.
 
 Cabinet retains one previous complete version with a `.bak` suffix, including state metadata. Load a backup state with `--load-state FILE`; to restore battery/RTC data, close the runner and copy the backup over the live file. Files written directly by cores are managed by those cores.
 
