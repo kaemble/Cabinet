@@ -2,6 +2,43 @@
 #include "firmware.h"
 #include "save_storage.h"
 
+std::vector<Home::EditRow> Home::edit_rows() const
+{
+    const int sys = system_index(draft.system);
+    const std::string system = draft.system == "generic" ? "Generic" : sys < 0 ? "Choose a system" : systems()[sys].name;
+    const std::string core = draft.core.empty() ? "Choose a core file" : fs::path(draft.core).filename().string();
+    std::vector<EditRow> rows{
+        {EditAction::Title, "Title: " + draft.title},
+        {EditAction::System, "System: " + system},
+        {EditAction::Core, "Core: " + core},
+        {EditAction::Favorite, draft.favorite ? "Favorite: yes" : "Favorite: no"}
+    };
+    if (editing)
+    {
+        rows.push_back({EditAction::BoxArt, boxart.pending() ? "Box art: new image selected" : "Box art: choose image"});
+    }
+    else if (draft.system == "generic")
+    {
+        const std::string rom = draft.path.empty() ? "Skip (run without content)" : fs::path(draft.path).filename().string();
+        rows.push_back({EditAction::Content, "ROM: " + rom});
+    }
+    if (!api_key.empty())
+    {
+        rows.push_back({EditAction::Artwork, artwork_loading() ? "SteamGridDB: loading... (select to cancel)"
+                   : boxart.pending() ? "SteamGridDB: image selected (search again)" : "SteamGridDB: find box art"});
+    }
+    rows.push_back({EditAction::Save, editing ? "Save changes" : "Add to library"});
+    rows.push_back({EditAction::Cancel, "Cancel"});
+    return rows;
+}
+
+int Home::edit_index(EditAction action) const
+{
+    const auto rows = edit_rows();
+    const auto row = std::ranges::find(rows, action, &EditRow::action);
+    return static_cast<int>(row - rows.begin());
+}
+
 std::vector<std::string> Home::modal_rows()
 {
     if (modal == Modal::Menu)
@@ -46,29 +83,11 @@ std::vector<std::string> Home::modal_rows()
     }
     if (modal == Modal::Edit)
     {
-        int sys = system_index(draft.system);
-        std::vector<std::string> rows{"Title: " + draft.title,
-                                      "System: " + (draft.system == "generic" ? std::string("Generic")
-                                                      : (sys < 0) ? std::string("Choose a system") : systems()[sys].name),
-                                      "Core: " + (draft.core.empty() ? std::string("Choose a core file")
-                                                                     : fs::path(draft.core).filename().string()),
-                                      draft.favorite ? "Favorite: yes" : "Favorite: no"};
-        if (editing)
+        std::vector<std::string> rows;
+        for (auto& row : edit_rows())
         {
-            rows.push_back(boxart.pending() ? "Box art: new image selected" : "Box art: choose image");
+            rows.push_back(std::move(row.label));
         }
-        if (!editing && draft.system == "generic")
-        {
-            rows.push_back("ROM: " + (draft.path.empty() ? std::string("Skip (run without content)")
-                                                       : fs::path(draft.path).filename().string()));
-        }
-        if (!api_key.empty())
-        {
-            rows.push_back(artwork_loading() ? "SteamGridDB: loading... (select to cancel)"
-                           : boxart.pending() ? "SteamGridDB: image selected (search again)" : "SteamGridDB: find box art");
-        }
-        rows.push_back(editing ? "Save changes" : "Add to library");
-        rows.push_back("Cancel");
         return rows;
     }
     if (modal == Modal::Remove)
@@ -192,7 +211,8 @@ void Home::back()
                 : (intent == BrowsePurpose::Locate) ? Modal::Details
                 : (intent == BrowsePurpose::Custom) ? Modal::Menu
                                                      : Modal::None;
-        choice = (intent == BrowsePurpose::BoxArt || intent == BrowsePurpose::Content) ? 4 : 0;
+        choice = intent == BrowsePurpose::BoxArt ? edit_index(EditAction::BoxArt)
+                 : intent == BrowsePurpose::Content ? edit_index(EditAction::Content) : 0;
         return;
     }
     if (modal == Modal::ApiKey)
@@ -206,7 +226,7 @@ void Home::back()
         ++artwork_generation;
         queued_artwork.clear();
         modal = Modal::Edit;
-        choice = (editing || draft.system == "generic") ? 5 : 4;
+        choice = edit_index(EditAction::Artwork);
     }
     else if (modal == Modal::Settings)
     {
@@ -243,7 +263,7 @@ void Home::back()
     else if (modal == Modal::Bios)
     {
         modal = bios_for_import ? Modal::Edit : Modal::Details;
-        choice = bios_for_import ? 4 : 0;
+        choice = bios_for_import ? edit_index(api_key.empty() ? EditAction::Save : EditAction::Artwork) : 0;
     }
     else if (modal == Modal::Details)
     {
@@ -441,6 +461,7 @@ void Home::activate(bool with_controller)
                           {
                               return entry.id == id;
                           });
+            recount_systems();
             refilter();
             modal = Modal::None;
             notify("Removed from library. The game file remains untouched.");
@@ -472,32 +493,28 @@ void Home::activate(bool with_controller)
     }
     if (modal == Modal::Edit)
     {
-        if (choice == 0)
+        switch (edit_rows().at(choice).action)
         {
+        case EditAction::Title:
             start_text(true);
-        }
-        else if (choice == 1)
-        {
+            break;
+        case EditAction::System:
             set_system(1);
-        }
-        else if (choice == 2)
-        {
+            break;
+        case EditAction::Core:
             start_browse(BrowsePurpose::Core);
-        }
-        else if (choice == 3)
-        {
+            break;
+        case EditAction::Favorite:
             draft.favorite = !draft.favorite;
             dirty = true;
-        }
-        else if (editing && choice == 4)
-        {
+            break;
+        case EditAction::BoxArt:
             start_browse(BrowsePurpose::BoxArt);
-        }
-        else if (!editing && draft.system == "generic" && choice == 4)
-        {
+            break;
+        case EditAction::Content:
             start_browse(BrowsePurpose::Content);
-        }
-        else if (!api_key.empty() && choice == ((editing || draft.system == "generic") ? 5 : 4))
+            break;
+        case EditAction::Artwork:
         {
             if (artwork_loading())
             {
@@ -513,9 +530,9 @@ void Home::activate(bool with_controller)
             artwork_query = draft.title;
             artwork_games.clear();
             fetch_artwork();
+            break;
         }
-        else if (choice == ((editing || draft.system == "generic") ? 5 : 4) + (api_key.empty() ? 0 : 1))
-        {
+        case EditAction::Save:
             if (!editing && requires_bios(draft.system) &&
                 !has_bios(draft.system, fs::path(data_dir) / "system"))
             {
@@ -530,10 +547,10 @@ void Home::activate(bool with_controller)
             {
                 finish_import();
             }
-        }
-        else
-        {
+            break;
+        case EditAction::Cancel:
             back();
+            break;
         }
         return;
     }

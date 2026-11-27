@@ -13,6 +13,7 @@
 #include <array>
 #include <filesystem>
 #include <future>
+#include <map>
 #include <utility>
 
 namespace fs = std::filesystem;
@@ -133,6 +134,9 @@ private:
     std::int64_t launched_id = 0;
     bool launched_with_controller = false;
     bool played_recorded = false;
+    std::map<std::string, int> system_counts;
+    void recount_systems();
+    float measured_playtime_width = 0;
     void cache_game(const Game& changed);
     void refresh(std::int64_t id);
     void refilter(std::int64_t preserve = 0);
@@ -157,12 +161,7 @@ private:
     void request_close();
     int system_count() const
     {
-        const bool custom = std::any_of(all.begin(), all.end(),
-                                        [](const Game& game)
-                                        {
-                                            return game.system == "generic";
-                                        });
-        return static_cast<int>(systems().size()) - (custom ? 0 : 1);
+        return static_cast<int>(systems().size()) - (system_counts.contains("generic") ? 0 : 1);
     }
     void start_browse(BrowsePurpose intent);
     void choose_file(const fs::path& path);
@@ -195,6 +194,17 @@ private:
     {
         return visible.empty() ? nullptr : &visible[static_cast<std::size_t>(selected)];
     }
+    enum class EditAction
+    {
+        Title, System, Core, Favorite, BoxArt, Content, Artwork, Save, Cancel
+    };
+    struct EditRow
+    {
+        EditAction action;
+        std::string label;
+    };
+    std::vector<EditRow> edit_rows() const;
+    int edit_index(EditAction action) const;
     std::vector<std::string> modal_rows();
     void box(SDL_FRect rect, SDL_Color color);
     void label(float x, float y, const std::string& value, int size = 16, SDL_Color color = ink, float max = 10000)

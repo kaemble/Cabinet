@@ -162,6 +162,10 @@ void Home::update_layout()
     {
         return;
     }
+    if (width != layout.width || height != layout.height)
+    {
+        measured_playtime_width = 0;
+    }
     layout.resize(width, height);
     // Layout uses window points; SDL maps these to all available output pixels.
     SDL_SetRenderLogicalPresentation(renderer, width, height, SDL_LOGICAL_PRESENTATION_STRETCH);
@@ -213,11 +217,8 @@ void Home::draw()
     for (int i = 0; i < system_count(); ++i)
     {
         const auto& system = systems()[i];
-        int count = static_cast<int>(std::count_if(all.begin(), all.end(),
-                                                   [&](const Game& game)
-                                                   {
-                                                       return game.system == system.id;
-                                                   }));
+        const auto found = system_counts.find(system.id);
+        const int count = found == system_counts.end() ? 0 : found->second;
         std::string name = (l.side < 200) ? system.short_name : system.name;
         if (name.size() > 24)
         {
@@ -331,11 +332,15 @@ void Home::draw()
         float playtime_width = 104;
         if (list_view)
         {
-            for (const auto& g : visible)
+            if (!measured_playtime_width)
             {
-                playtime_width = std::max(playtime_width, text.width(format_playtime(g.playtime), detail));
+                measured_playtime_width = playtime_width;
+                for (const auto& g : visible)
+                {
+                    measured_playtime_width = std::max(measured_playtime_width, text.width(format_playtime(g.playtime), detail));
+                }
             }
-            playtime_width = std::min(playtime_width, l.content * .45f);
+            playtime_width = std::min(measured_playtime_width, l.content * .45f);
             label(right - playtime_width - l.gap, l.grid_top, "Playtime", detail, muted, playtime_width);
         }
         // Navigation counts complete rows, but drawing also includes the next

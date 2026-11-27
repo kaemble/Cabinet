@@ -76,9 +76,12 @@ void Home::event(SDL_Event event)
     }
     switch (event.type)
     {
+    case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
+    case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+        measured_playtime_width = 0;
+        [[fallthrough]];
     case SDL_EVENT_WINDOW_EXPOSED:
     case SDL_EVENT_WINDOW_RESIZED:
-    case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
     case SDL_EVENT_WINDOW_FOCUS_GAINED:
     case SDL_EVENT_WINDOW_RESTORED:
     case SDL_EVENT_WINDOW_SHOWN:

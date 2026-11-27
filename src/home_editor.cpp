@@ -53,7 +53,7 @@ void Home::import_file(const fs::path& path, bool custom)
         editing = false;
         dirty = false;
         modal = Modal::Edit;
-        choice = 2;
+        choice = edit_index(EditAction::Core);
         browser.set_folder(fs::path(draft.path).parent_path());
         import_artwork();
         return;
@@ -130,7 +130,7 @@ void Home::choose_file(const fs::path& path)
         editing = false;
         dirty = false;
         modal = Modal::Edit;
-        choice = 4;
+        choice = edit_index(EditAction::Content);
         import_artwork();
     }
     else if (browser.purpose() == BrowsePurpose::Content)
@@ -139,7 +139,7 @@ void Home::choose_file(const fs::path& path)
         draft.title = path.stem().string();
         dirty = true;
         modal = Modal::Edit;
-        choice = api_key.empty() ? 5 : 6;
+        choice = edit_index(EditAction::Save);
         import_artwork();
     }
     else if (browser.purpose() == BrowsePurpose::BoxArt)
@@ -149,14 +149,14 @@ void Home::choose_file(const fs::path& path)
         boxart.select(path);
         dirty = true;
         modal = Modal::Edit;
-        choice = 4;
+        choice = edit_index(EditAction::BoxArt);
     }
     else if (browser.purpose() == BrowsePurpose::Core)
     {
         draft.core = fs::canonical(path).string();
         dirty = true;
         modal = Modal::Edit;
-        choice = 2;
+        choice = edit_index(EditAction::Core);
     }
     else
     {
@@ -315,7 +315,7 @@ void Home::poll_artwork()
                     if (modal == Modal::SteamGrid)
                     {
                         modal = Modal::Edit;
-                        choice = (editing || draft.system == "generic") ? 5 : 4;
+                        choice = edit_index(EditAction::Artwork);
                     }
                     notify("SteamGridDB artwork selected. Save to keep it.");
                 }

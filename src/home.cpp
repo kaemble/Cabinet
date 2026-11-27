@@ -17,6 +17,7 @@ Home::Home(SDL_Window* window, SDL_Renderer* renderer, const fs::path& data, std
     swap_confirm_cancel = settings.contains("swap_confirm_cancel") && settings.at("swap_confirm_cancel") == "1";
     dual_screen = settings.contains("dual_screen") && settings.at("dual_screen") == "1";
     all = library.games();
+    recount_systems();
     refilter();
     if (!discover())
     {
@@ -35,6 +36,15 @@ Home::~Home()
     }
 }
 
+void Home::recount_systems()
+{
+    system_counts.clear();
+    for (const auto& entry : all)
+    {
+        ++system_counts[entry.system];
+    }
+}
+
 void Home::cache_game(const Game& changed)
 {
     const auto existing = std::find_if(all.begin(), all.end(),
@@ -46,12 +56,18 @@ void Home::cache_game(const Game& changed)
     {
         if (existing->title == changed.title)
         {
+            const bool system_changed = existing->system != changed.system;
             *existing = changed;
+            if (system_changed)
+            {
+                recount_systems();
+            }
             return;
         }
         all.erase(existing);
     }
     all.insert(std::lower_bound(all.begin(), all.end(), changed, game_title_less), changed);
+    recount_systems();
 }
 void Home::refresh(std::int64_t id)
 {
@@ -66,6 +82,7 @@ void Home::refresh(std::int64_t id)
                       {
                           return entry.id == id;
                       });
+        recount_systems();
     }
     refilter(id);
 }
@@ -84,6 +101,7 @@ void Home::refilter(std::int64_t preserve)
     auto filter = (sidebar == 1)   ? LibraryFilter::Favorites
                   : (sidebar == 2) ? LibraryFilter::Recent
                                    : LibraryFilter::All;
+    measured_playtime_width = 0;
     visible = filter_games(all, (sidebar >= 3) ? systems()[sidebar - 3].id : "", filter, query);
     selected = 0;
     for (std::size_t i = 0; i < visible.size(); ++i)
