@@ -2,30 +2,17 @@
 #include <cstdint>
 #include <cstddef>
 #include <libretro.h>
-#include "frontend.h"
+#include "runner_session.h"
+#include "runner_game_files.h"
+#include "runner_settings.h"
 #include "ui_text.h"
 #include "runner_options.h"
 #include "app_paths.h"
-#include "hardware_video.h"
-#include "vulkan_video.h"
 #include "save_storage.h"
-#include "save_manager.h"
-#include "runahead.h"
 #include <tuple>
 #include "runner_pacing.h"
-#include "audio_output.h"
-#include "async_audio.h"
-#include "libretro_core.h"
-#include "input_router.h"
-#include "settings_store.h"
-#include "core_options.h"
 #include "runner_diagnostics.h"
 #include "dual_screen.h"
-#include "secondary_window.h"
-#include "game_presentation.h"
-#ifdef CABINET_ARMADA_DRM
-#include "armada_drm.h"
-#endif
 #include <string_view>
 
 #include <algorithm>
@@ -55,241 +42,6 @@ static void check(bool success)
         throw std::runtime_error(SDL_GetError());
     }
 }
-
-// One session per process. All core calls and video callbacks run on the main
-// thread for this initial launcher; no concurrent access to the core occurs.
-struct Session
-{
-    LibretroCore core;
-    RunAhead runahead;
-    bool runahead_active = false, speculative = false, output_enabled = true;
-    std::uint64_t serialization_quirks = 0;
-    std::uint64_t runahead_input_frame = 0;
-    std::map<std::tuple<unsigned, unsigned, unsigned, unsigned>,
-             std::pair<std::uint64_t, std::int16_t>> runahead_input;
-    SDL_Window* window = nullptr;
-    SDL_Renderer* renderer = nullptr;
-    SDL_Texture* texture = nullptr;
-    GamePresentation presentation, bottom_presentation;
-    bool dual_screen = false;
-    std::unique_ptr<SecondaryWindow> secondary;
-#ifdef CABINET_ARMADA_DRM
-    std::unique_ptr<ArmadaDrm> leased_bottom;
-#endif
-    bool focused() const
-    {
-        return (window && (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS)) ||
-               (secondary && (SDL_GetWindowFlags(secondary->window) & SDL_WINDOW_INPUT_FOCUS));
-    }
-    AudioOutput audio;
-    AsyncAudio async_audio;
-    std::unique_ptr<HardwareVideo> hardware;
-    std::unique_ptr<VulkanVideo> vulkan;
-    bool prefer_vulkan = false;
-    bool support_no_game = false;
-    retro_hw_render_callback hw{};
-    bool hw_ready = false;
-    SDL_PixelFormat texture_format = SDL_PIXELFORMAT_UNKNOWN;
-    unsigned width = 0, height = 0;
-    SDL_PixelFormat format = SDL_PIXELFORMAT_XRGB1555;
-    float aspect = 160.0f / 144.0f;
-    bool texture_is_hardware = false;
-    unsigned frames = 0;
-    std::string callback_error, hardware_error, system_dir;
-    CoreOptions core_options;
-    bool rebuilding_video = false;
-    unsigned hw_width = 0, hw_height = 0;
-    double frame_rate = 60;
-    retro_frame_time_callback frame_time{};
-    std::uint64_t last_frame_time_ns = 0;
-    void notify_frame_time(std::uint64_t now)
-    {
-        if (!frame_time.callback)
-        {
-            return;
-        }
-        const auto reference = frame_time.reference > 0
-                                   ? frame_time.reference
-                                   : static_cast<retro_usec_t>(std::llround(1000000.0 / frame_rate));
-        const auto elapsed = !last_frame_time_ns || fast_forward
-                                 ? reference
-                                 : static_cast<retro_usec_t>((now - last_frame_time_ns) / 1000);
-        last_frame_time_ns = now;
-        frame_time.callback(elapsed);
-    }
-    bool fast_forward = false;
-    int core_log_level = RETRO_LOG_WARN;
-    InputRouter input;
-    bool pointer_sampled = false;
-    Frontend frontend;
-    SaveManager saves;
-    GameInputContext input_context() const
-    {
-        return {core_options.values, frontend.bindings.system(), frontend.paused()};
-    }
-    SaveCore save_core() const
-    {
-        return {core.api.get_memory_data, core.api.get_memory_size, core.api.serialize_size, core.api.serialize,
-                core.api.unserialize};
-    }
-    GamePresentation::Image presentation_image() const
-    {
-        return {texture,
-                width,
-                height,
-                aspect,
-                frontend.aspect_mode,
-                frontend.scaling,
-                texture_is_hardware && hardware && hardware->flipped(),
-                &frontend.shaders};
-    }
-    void draw_view(GamePresentation& view, SDL_Renderer* target, const GamePresentation::Image& frame,
-                   const SDL_FRect& destination, const SDL_FRect* crop = nullptr
-#ifdef CABINET_ARMADA_DRM
-                   , ArmadaDrm* scanout = nullptr
-#endif
-    )
-    {
-        auto draw = [&]
-        {
-            view.draw(target, frame, destination, crop
-#ifdef CABINET_ARMADA_DRM
-                      , scanout
-#endif
-            );
-        };
-        try
-        {
-            draw();
-        }
-        catch (const std::exception& error)
-        {
-            if (!frontend.shaders.active())
-            {
-                throw;
-            }
-            for (auto& shader : frontend.shaders.effects)
-            {
-                shader.enabled = false;
-            }
-            view.reset();
-            frontend.notify(std::string("Shaders disabled: ") + error.what());
-            draw();
-        }
-    }
-    ~Session()
-    {
-        async_audio.clear();
-        frontend.stop_rumble();
-        if (!saves.metadata.empty())
-        {
-            saves.playtime.update(SDL_GetTicks(), false);
-            try
-            {
-                saves.write_playtime();
-            }
-            catch (const std::exception& error)
-            {
-                std::cerr << "Cabinet: " << error.what() << '\n';
-            }
-        }
-        SDL_ShowCursor();
-        {
-            std::unique_lock<VulkanVideo> lock;
-            if (vulkan)
-            {
-                lock = std::unique_lock<VulkanVideo>(*vulkan);
-            }
-            bottom_presentation.reset();
-        }
-        secondary.reset();
-#ifdef CABINET_ARMADA_DRM
-        if (dual_screen && leased_bottom)
-        {
-            std::unique_lock<VulkanVideo> lock;
-            if (vulkan)
-            {
-                lock = std::unique_lock<VulkanVideo>(*vulkan);
-            }
-            leased_bottom.reset();
-        }
-#endif
-        {
-            std::unique_lock<VulkanVideo> lock;
-            if (vulkan)
-            {
-                lock = std::unique_lock<VulkanVideo>(*vulkan);
-            }
-            presentation.reset();
-        }
-        if (texture && !(vulkan && texture_is_hardware))
-        {
-            SDL_DestroyTexture(texture);
-        }
-        texture = nullptr;
-        if (vulkan)
-        {
-            try
-            {
-                vulkan->idle();
-            }
-            catch (const std::exception& e)
-            {
-                std::cerr << e.what() << '\n';
-            }
-        }
-        if (hardware)
-        {
-            try
-            {
-                hardware->make_current();
-            }
-            catch (const std::exception& error)
-            {
-                std::cerr << error.what() << '\n';
-            }
-        }
-        if (core.loaded() && saves.battery_ready)
-        {
-            try
-            {
-                saves.battery(save_core(), false);
-            }
-            catch (const std::exception& error)
-            {
-                std::cerr << "Cabinet: " << error.what() << '\n';
-            }
-        }
-        // The core may delete its graphics callback owner in unload_game.
-        if (hw_ready && hw.context_destroy)
-        {
-            hw.context_destroy();
-        }
-        core.shutdown();
-        // Cores can release Vulkan resources during unload/deinit as well as
-        // context_destroy. Keep their frontend-owned device alive until then.
-        if (vulkan)
-        {
-            vulkan.reset();
-            renderer = nullptr;
-        }
-        hardware.reset();
-        audio.close();
-        if (texture)
-        {
-            SDL_DestroyTexture(texture);
-        }
-        if (renderer)
-        {
-            SDL_DestroyRenderer(renderer);
-        }
-        if (window)
-        {
-            SDL_DestroyWindow(window);
-        }
-        core.close();
-    }
-};
 
 static Session* current = nullptr;
 static bool core_rumble(unsigned port, retro_rumble_effect effect, std::uint16_t strength)
@@ -972,45 +724,6 @@ static std::int16_t input_state(unsigned port, unsigned device, unsigned index, 
     return value;
 }
 
-static std::string fingerprint(std::string_view bytes)
-{
-    std::uint64_t hash = 14695981039346656037ull;
-    for (unsigned char byte : bytes)
-    {
-        hash ^= byte;
-        hash *= 1099511628211ull;
-    }
-    std::ostringstream result;
-    result << std::hex << std::setw(16) << std::setfill('0') << hash;
-    return result.str();
-}
-
-static std::string fingerprint(const std::vector<char>& bytes)
-{
-    return fingerprint(std::string_view(bytes.data(), bytes.size()));
-}
-
-static std::vector<char> read_content(const fs::path& path)
-{
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
-    if (!file)
-    {
-        throw std::runtime_error("Cannot open file: " + path.string());
-    }
-    const auto size = file.tellg();
-    if (size <= 0)
-    {
-        throw std::runtime_error("File is empty or unreadable: " + path.string());
-    }
-    std::vector<char> bytes(static_cast<std::size_t>(size));
-    file.seekg(0);
-    if (!file.read(bytes.data(), static_cast<std::streamsize>(bytes.size())))
-    {
-        throw std::runtime_error("Cannot read file: " + path.string());
-    }
-    return bytes;
-}
-
 static void save_state(Session& s)
 {
     s.async_audio.set_enabled(false);
@@ -1121,39 +834,6 @@ static void run_core_frame(Session& session, bool core_has_run)
     }
 }
 
-static SettingsSnapshot settings_snapshot(const Session& s)
-{
-    SettingsSnapshot snapshot;
-    const auto& ui = s.frontend;
-    auto& values = snapshot.values;
-    values.volume = ui.volume;
-    values.wii_controller = ui.wii_controller;
-    values.fullscreen = ui.fullscreen;
-    values.aspect_mode = ui.aspect_mode;
-    values.scaling = ui.scaling;
-    values.shaders = ui.shaders;
-    values.vsync = ui.vsync;
-    values.vrr = ui.vrr;
-    values.runahead_frames = ui.runahead_option_key.empty() ? ui.runahead_frames : 0;
-    values.swap_confirm_cancel = ui.swap_confirm_cancel;
-    values.stick_shortcut = ui.stick_shortcut;
-    values.home_shortcut = ui.home_shortcut;
-    values.pause_on_focus_loss = ui.pause_on_focus_loss;
-    values.hide_cursor = ui.hide_cursor;
-    values.confirm_save_states = ui.confirm_save_states;
-    values.show_stats = ui.show_stats;
-    values.rumble = ui.rumble_enabled;
-    values.stick_deadzone = ui.stick_deadzone;
-    values.trigger_deadzone = ui.trigger_deadzone;
-    snapshot.game_config = ui.game_config;
-    snapshot.core_options = s.core_options.persistent_values(ui);
-    snapshot.resolution_key = s.core_options.resolution_key;
-    if (!s.core_options.resolution_key.empty())
-    {
-        snapshot.resolution_value = ui.resolution_values[ui.resolution_index];
-    }
-    return snapshot;
-}
 static int run_game_session(const RunnerOptions& inherited, const RunnerOptions& base,
                             std::optional<RunnerOptions>& restart)
 {
@@ -1204,145 +884,10 @@ static int run_game_session(const RunnerOptions& inherited, const RunnerOptions&
     {
         content = read_content(rom_path);
     }
-    std::string game_id;
-    if (!options.game_id.empty())
-    {
-        game_id = options.game_id;
-    }
-    else if (contentless)
-    {
-        game_id = "core-" + save_storage::folder_name(fs::path(core_path).stem().string(), 100);
-    }
-    else if (info.need_fullpath)
-    {
-        // Standalone fallback; Cabinet supplies an ID independent of the path.
-        game_id = "path-" + fingerprint(fs::canonical(rom_path).generic_string());
-    }
-    else
-    {
-        game_id = fingerprint(content);
-    }
     session.dual_screen = dual_screen;
-    const std::string storage_system =
-        (options.game_id.empty() || input_system == "generic") ? "Generic" : input_system;
-    const auto save_name = options.save_name.empty() ? game_id : options.save_name;
-    const auto save_root = options.save_dir.empty() ? data_dir / "saves" : fs::absolute(options.save_dir);
-    const auto save_directory = save_root / storage_system / save_name;
-    session.saves.directory = save_directory.string();
-    fs::create_directories(save_directory);
-    const auto old_metadata = save_storage::read(save_directory / "cabinet-game.txt");
-    if (old_metadata.contains("game_id") && old_metadata.at("game_id") != game_id)
-    {
-        throw std::runtime_error("Save folder belongs to another game: " + save_directory.string());
-    }
-    const auto core_name = fs::path(core_path).stem().string();
-    const auto rom_stem = contentless ? core_name : fs::path(rom_path).stem().string();
-    const auto default_title =
-        (contentless && info.library_name && *info.library_name) ? std::string(info.library_name) : rom_stem;
-    if (old_metadata.contains("rom_stem"))
-    {
-        save_storage::relocate_native_saves(save_directory, old_metadata.at("rom_stem"), rom_stem, core_name);
-    }
-    const auto core_hash = fingerprint(read_content(core_path));
-    session.saves.metadata = {{"format", "1"},
-                              {"game_id", game_id},
-                              {"system", input_system},
-                              {"title", options.title.empty() ? default_title : options.title},
-                              {"save_name", save_name},
-                              {"rom_stem", rom_stem},
-                              {"core", core_name},
-                              {"core_name", info.library_name ? info.library_name : ""},
-                              {"core_version", info.library_version ? info.library_version : ""},
-                              {"core_hash", core_hash},
-                              {"core_hash_algorithm", "fnv1a64"}};
-    if (!contentless && !info.need_fullpath)
-    {
-        session.saves.metadata["rom_hash"] = fingerprint(content);
-        session.saves.metadata["rom_hash_algorithm"] = "fnv1a64";
-    }
-    session.saves.playtime.seconds = options.playtime;
-    if (old_metadata.contains("playtime"))
-    {
-        const auto previous = parse_playtime(old_metadata.at("playtime"));
-        if (previous)
-        {
-            session.saves.playtime.seconds = std::max(session.saves.playtime.seconds, *previous);
-        }
-    }
-    session.saves.write_playtime();
-    const auto game_config_dir = application_config(options.data_dir) / "games" / storage_system / game_id;
-    session.frontend.game_config = fs::is_regular_file(game_config_dir / "settings.conf");
-    if (session.frontend.game_config)
-    {
-        settings_store::read_game(game_config_dir / "settings.conf", options);
-    }
-    session.core_options.values = options.core_options;
-    if (session.dual_screen)
-    {
-        session.core_options.runtime_overrides =
-            input_system == "nds" ? std::map<std::string, std::string>{{"melonds_screen_layout1", "top-bottom"},
-                                                                       {"melonds_number_of_screen_layouts", "1"},
-                                                                       {"melonds_screen_gap", "0"},
-                                                                       {"melonds_secondary_screen_scale", "100"},
-                                                                       {"melonds_touch_mode", "touch"}}
-                                  : std::map<std::string, std::string>{{"citra_layout_option", "default"},
-                                                                       {"citra_swap_screen", "Top"},
-                                                                       {"citra_render_3d", "off"}};
-    }
-    session.frontend.fullscreen = options.fullscreen;
-    session.frontend.scaling = options.scaling;
-    session.frontend.shaders = options.shaders;
-    session.frontend.wii_controller = options.wii_controller;
-    session.frontend.aspect_mode = options.aspect_mode;
-    session.frontend.volume = options.volume;
-    session.frontend.rumble_enabled = options.rumble;
-    session.frontend.stick_deadzone = options.stick_deadzone;
-    session.frontend.trigger_deadzone = options.trigger_deadzone;
-    session.frontend.vsync = options.vsync;
-    session.frontend.vrr = options.vrr;
-    session.frontend.runahead_frames = options.runahead_frames;
-    session.frontend.swap_confirm_cancel = options.swap_confirm_cancel;
-    try
-    {
-        const auto input_dir =
-            session.frontend.game_config ? game_config_dir / "input" : application_config(options.data_dir) / "input";
-        session.frontend.bindings.configure(input_system, input_dir, options.wii_controller);
-        session.frontend.hotkeys.configure_hotkeys(input_system, input_dir);
-    }
-    catch (const std::exception& error)
-    {
-        // configure leaves the usable defaults in place if a saved file is malformed.
-        std::cerr << "Cabinet: " << error.what() << '\n';
-        session.frontend.notify("Could not read saved controls; using defaults");
-    }
-    session.frontend.stick_shortcut = options.stick_shortcut;
-    session.frontend.home_shortcut = options.home_shortcut;
-    session.frontend.pause_on_focus_loss = options.pause_on_focus_loss;
-    session.frontend.hide_cursor = options.hide_cursor;
-    session.frontend.confirm_save_states = options.confirm_save_states;
-    session.frontend.show_stats = options.show_stats;
-    fs::create_directories(session.system_dir);
-    fs::create_directories(session.saves.directory);
-    if (input_system == "wii")
-    {
-        session.core_options.values["dolphin_alt_gc_ports_on_wii"] = "disabled";
-        // dolphin_ir_mode values are numeric:
-        //   "0" = Right Stick (relative)
-        //   "1" = Right Stick (absolute)
-        //   "2" = Mouse controls pointer, required for RETRO_DEVICE_POINTER IR
-        if (!options.explicit_core_options.contains("dolphin_ir_mode"))
-        {
-            session.core_options.values["dolphin_ir_mode"] = "2";
-            session.core_options.values["dolphin_ir_yaw"] = "19";
-            session.core_options.values["dolphin_ir_pitch"] = "19";
-            session.core_options.values["dolphin_ir_offset"] = "15";
-        }
-    }
-    if (input_system == "md" && info.library_name && std::string_view(info.library_name) == "BlastEm")
-    {
-        session.core_options.values.try_emplace("blastem_io_1", "gamepad6.1");
-    }
-    session.prefer_vulkan = options.prefers_vulkan(info.library_name ? info.library_name : "");
+    const auto files = prepare_game_files(session.saves, options, data_dir, input_system, core_path, rom_path, info, content);
+    const auto& game_config_dir = files.game_config_dir;
+    apply_session_settings(session, options, game_config_dir, input_system, info.library_name);
     session.core.api.set_environment(environment);
     session.core.api.set_video_refresh(video);
     session.core.api.set_audio_sample(audio_sample);
@@ -1355,10 +900,10 @@ static int run_game_session(const RunnerOptions& inherited, const RunnerOptions&
         throw std::runtime_error("Core does not support running without content. Supply --rom PATH.");
     }
     const auto state_dir = options.state_dir.empty() ? data_dir / "states" : fs::absolute(options.state_dir);
-    const auto state_directory = state_dir / storage_system / save_name;
+    const auto state_directory = state_dir / files.storage_system / files.save_name;
     if (options.state_file.empty())
     {
-        session.saves.state_path = state_directory / core_name / (core_hash + ".state");
+        session.saves.state_path = state_directory / files.core_name / (files.core_hash + ".state");
         save_storage::write(state_directory / "cabinet-game.txt", session.saves.metadata);
     }
     else
@@ -1406,8 +951,8 @@ static int run_game_session(const RunnerOptions& inherited, const RunnerOptions&
         session.core_options.changed = true;
     }
     // Library saves use the persistent readable name; standalone saves retain the core filename.
-    const auto battery_name = options.save_name.empty() ? core_name : save_name;
-    session.saves.battery_path = save_directory / battery_name;
+    const auto battery_name = options.save_name.empty() ? files.core_name : files.save_name;
+    session.saves.battery_path = files.save_directory / battery_name;
     session.saves.battery(session.save_core(), true);
     session.frontend.has_save = fs::exists(session.saves.state_path);
     if (!session.callback_error.empty())
@@ -1432,8 +977,8 @@ static int run_game_session(const RunnerOptions& inherited, const RunnerOptions&
     {
         session.aspect = av.geometry.aspect_ratio;
     }
-    session.frontend.game_title = options.title.empty() ? default_title : options.title;
-    std::string title = options.title.empty() ? default_title : options.title;
+    session.frontend.game_title = options.title.empty() ? files.default_title : options.title;
+    const auto& title = session.frontend.game_title;
     if (session.hw.context_type != RETRO_HW_CONTEXT_VULKAN)
     {
         session.vulkan.reset();

@@ -76,7 +76,8 @@ add_custom_command(OUTPUT ${CABINET_INTERNAL_HEADERS}
   COMMENT "Compiling internal shaders" VERBATIM)
 add_custom_target(cabinet-shaders DEPENDS ${CABINET_EFFECT_HEADERS} ${CABINET_INTERNAL_HEADERS})
 
-add_library(cabinet_runner_core STATIC src/runner.cpp src/async_audio.cpp src/runahead.cpp src/runner_diagnostics.cpp src/runner_pacing.cpp src/game_presentation.cpp src/shader_chain.cpp src/shader_gl.cpp src/shader_vulkan.cpp src/secondary_window.cpp src/core_options.cpp src/settings_store.cpp src/input_router.cpp src/libretro_core.cpp src/audio_output.cpp src/save_manager.cpp src/runner_options.cpp src/frontend.cpp src/hardware_video.cpp src/vulkan_video.cpp src/input_bindings.cpp)
+add_library(cabinet_runner_core STATIC src/runner.cpp src/runner_session.cpp src/runner_game_files.cpp src/runner_settings.cpp
+  src/async_audio.cpp src/runahead.cpp src/runner_diagnostics.cpp src/runner_pacing.cpp src/game_presentation.cpp src/shader_chain.cpp src/shader_gl.cpp src/shader_vulkan.cpp src/secondary_window.cpp src/core_options.cpp src/settings_store.cpp src/input_router.cpp src/libretro_core.cpp src/audio_output.cpp src/save_manager.cpp src/runner_options.cpp src/frontend.cpp src/hardware_video.cpp src/vulkan_video.cpp src/input_bindings.cpp)
 add_dependencies(cabinet_runner_core cabinet-shaders)
 target_include_directories(cabinet_runner_core PUBLIC "${CABINET_SHADER_OUTPUT_DIR}")
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/third_party/core-info.json" CABINET_CORE_INFO)
