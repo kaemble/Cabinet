@@ -1695,7 +1695,8 @@ Frontend::MenuAppearance Frontend::menu_appearance(std::uint64_t now) const
 
 bool Frontend::needs_redraw(std::uint64_t now) const
 {
-    return !paused() || !presented_menu || *presented_menu != menu_appearance(now);
+    return !paused() || !presented_menu || presented_menu->page != page || presented_menu->selected != selected ||
+           *presented_menu != menu_appearance(now);
 }
 
 std::uint64_t Frontend::next_menu_update(std::uint64_t now) const
@@ -1825,7 +1826,8 @@ void Frontend::draw(SDL_Renderer* renderer, TextRenderer& font, int width, int h
         const float header_y = std::max({h * .08f, small + 28.0f, bar_height + body * .5f}) + h * .02f;
         const float list_top = std::max(h * .21f, header_y + heading_size + body * .5f);
         menu_text(left, header_y, heading, heading_size, white, w - left - margin);
-        const auto items = rows();
+        presented_menu = menu_appearance(draw_now);
+        const auto& items = presented_menu->items;
         const int visible = std::max(1, static_cast<int>((bar_top - list_top - 18) / row_height));
         const int first = selected / visible * visible;
         const int last = std::min(first + visible, static_cast<int>(items.size()));
@@ -2084,11 +2086,7 @@ void Frontend::draw(SDL_Renderer* renderer, TextRenderer& font, int width, int h
     }
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-    if (paused())
-    {
-        presented_menu = menu_appearance(draw_now);
-    }
-    else
+    if (!paused())
     {
         presented_menu.reset();
     }
