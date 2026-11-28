@@ -495,7 +495,10 @@ static void smaa_pixels(const char* driver)
         auto capture =
             [&](SDL_Texture* texture, const SDL_FRect* crop = nullptr, bool flipped = false, SDL_Point size = {32, 32})
         {
-            auto* output = chain.draw(renderer, texture, size.x, size.y, stack, crop, flipped);
+            auto* output = chain.draw(renderer, texture, size.x, size.y, stack, crop, flipped, {32, 32});
+            float width, height;
+            require(SDL_GetTextureSize(output, &width, &height) && width == 32 && height == 32,
+                    "SMAA must render at viewport output resolution");
             require(SDL_SetTextureScaleMode(output, SDL_SCALEMODE_NEAREST), SDL_GetError());
             require(SDL_RenderTexture(renderer, output, nullptr, nullptr), SDL_GetError());
             auto* surface = SDL_RenderReadPixels(renderer, nullptr);
@@ -536,6 +539,17 @@ static void smaa_pixels(const char* driver)
                         "SMAA edge detection differs from the CPU reference");
             }
         }
+        const SDL_FRect half{8, 8, 16, 16};
+        auto enlarged = image;
+        for (int y = 0; y < 32; ++y)
+        {
+            for (int x = 0; x < 32; ++x)
+            {
+                enlarged[y * 32 + x] = image[(8 + y / 2) * 32 + 8 + x / 2];
+            }
+        }
+        require(capture(input, &half) == smaa_edges_reference(enlarged, 32, 32, true, smaa.parameters[1] * .001),
+                "SMAA edge detection must compare neighboring output pixels");
         smaa = shaders::Shader(shaders::Effect::Smaa);
         smaa.enabled = true;
         for (int y = 0; y < 32; ++y)
