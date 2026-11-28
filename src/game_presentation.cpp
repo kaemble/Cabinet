@@ -121,12 +121,14 @@ void GamePresentation::draw(SDL_Renderer* renderer, const Image& frame, const SD
         return;
     }
 #endif
-    // A 1x intermediate only copies the image. Downscaling and small viewports
-    // use bilinear directly; both passes of integer enlargement stay on the GPU.
-    if (frame.scaling == 2 && destination.w >= source.w * 2.0f && destination.h >= source.h * 2.0f)
+    const int factor = (frame.scaling == 2)
+                           ? std::max(1, static_cast<int>(std::floor(std::min(destination.w / source.w,
+                                                                               destination.h / source.h))))
+                           : 1;
+    // Isolate a viewport before linear filtering so taps at its edges repeat its own pixels.
+    const bool isolate_crop = crop && texture == frame.texture && filter == SDL_SCALEMODE_LINEAR;
+    if (isolate_crop || factor > 1)
     {
-        const int factor =
-            std::max(1, static_cast<int>(std::floor(std::min(destination.w / source.w, destination.h / source.h))));
         const int width = static_cast<int>(source.w) * factor, height = static_cast<int>(source.h) * factor;
         if (!intermediate || intermediate_dimensions.x != width || intermediate_dimensions.y != height)
         {

@@ -12,8 +12,8 @@ void main() {
         vec2 pixel = uv * p.panel.zw - .5;
         vec2 fraction = clamp(fract(pixel) * factor - .5 * (factor - 1), 0, 1);
         coord = (floor(pixel) + fraction + .5) / p.panel.zw;
-        coord = clamp(coord, p.source.xy + .5 / p.panel.zw,
-            p.source.xy + p.source.zw - .5 / p.panel.zw);
     }
+    coord = clamp(coord, p.source.xy + .5 / p.panel.zw,
+        p.source.xy + p.source.zw - .5 / p.panel.zw);
     color = vec4(texture(frame, coord).rgb * p.options.y, 1);
 }
