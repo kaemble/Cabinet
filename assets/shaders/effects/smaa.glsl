@@ -4,7 +4,6 @@
 //   "name": "SMAA",
 //   "entry": "smaa_blend",
 //   "context": true,
-//   "resolution": "output",
 //   "passes": [
 //     "smaa_detect",
 //     "smaa_weights",
@@ -669,19 +668,6 @@
  * SOFTWARE.
  */
 // Lookup bytes: iryoku/smaa Textures/{AreaTex,SearchTex}.h.
-vec2 smaa_texel_size()
-{
-    return 1.0 / output_size();
-}
-
-#if CABINET_PASS != 1
-vec3 smaa_sample_color(vec2 position)
-{
-    vec2 edge = 0.5 * smaa_texel_size();
-    return sample_frame(clamp(position, edge, vec2(1.0) - edge));
-}
-#endif
-
 #if CABINET_PASS == 0
 float smaa_delta(vec3 first, vec3 second)
 {
@@ -697,9 +683,9 @@ vec4 smaa_detect(vec3 input_color, vec2 position, float frame_count, float optio
                  float option_edge_threshold, float option_search_steps, float option_diagonal_steps,
                  float option_corner_rounding, float option_debug_output)
 {
-    vec2 texel = smaa_texel_size();
-    vec3 left = smaa_sample_color(position - vec2(texel.x, 0.0));
-    vec3 top = smaa_sample_color(position - vec2(0.0, texel.y));
+    vec2 texel = frame_texel_size();
+    vec3 left = sample_frame(position - vec2(texel.x, 0.0));
+    vec3 top = sample_frame(position - vec2(0.0, texel.y));
     vec4 delta;
     delta.xy = vec2(smaa_delta(input_color, left), smaa_delta(input_color, top));
     vec2 edges = step(vec2(edge_threshold()), delta.xy);
@@ -707,11 +693,11 @@ vec4 smaa_detect(vec3 input_color, vec2 position, float frame_count, float optio
     {
         return vec4(0.0);
     }
-    delta.zw = vec2(smaa_delta(input_color, smaa_sample_color(position + vec2(texel.x, 0.0))),
-                    smaa_delta(input_color, smaa_sample_color(position + vec2(0.0, texel.y))));
+    delta.zw = vec2(smaa_delta(input_color, sample_frame(position + vec2(texel.x, 0.0))),
+                    smaa_delta(input_color, sample_frame(position + vec2(0.0, texel.y))));
     vec2 maximum_delta = max(delta.xy, delta.zw);
-    delta.zw = vec2(smaa_delta(left, smaa_sample_color(position - vec2(2.0 * texel.x, 0.0))),
-                    smaa_delta(top, smaa_sample_color(position - vec2(0.0, 2.0 * texel.y))));
+    delta.zw = vec2(smaa_delta(left, sample_frame(position - vec2(2.0 * texel.x, 0.0))),
+                    smaa_delta(top, sample_frame(position - vec2(0.0, 2.0 * texel.y))));
     maximum_delta = max(maximum_delta, delta.zw);
     edges *= step(vec2(max(maximum_delta.x, maximum_delta.y)), 2.0 * delta.xy);
     return vec4(edges, 0.0, 0.0);
@@ -721,7 +707,7 @@ vec4 smaa_detect(vec3 input_color, vec2 position, float frame_count, float optio
 #if CABINET_PASS == 1
 vec4 smaa_metrics()
 {
-    return vec4(smaa_texel_size(), output_size());
+    return vec4(frame_texel_size(), frame_size());
 }
 
 vec2 smaa_round(vec2 value)
@@ -823,15 +809,15 @@ vec2 smaa_calculate_diag_weights(vec2 texcoord, vec2 e, vec4 subsample_indices)
     {
         vec4 coords = (vec4(-d.x + 0.25, d.x, d.y, -d.y - 0.25) * smaa_metrics().xyxy + texcoord.xyxy);
         vec4 c;
-        c.xy = sample_pass_0((coords.xy + vec2(-1.0, 0.0) * smaa_texel_size())).rg;
-        c.zw = sample_pass_0((coords.zw + vec2(1.0, 0.0) * smaa_texel_size())).rg;
+        c.xy = sample_pass_0((coords.xy + vec2(-1.0, 0.0) * frame_texel_size())).rg;
+        c.zw = sample_pass_0((coords.zw + vec2(1.0, 0.0) * frame_texel_size())).rg;
         c.yxwz = smaa_decode_diag_bilinear_access(c.xyzw);
         vec2 cc = (vec2(2.0, 2.0) * c.xz + c.yw);
         smaa_movc(bvec2(step(0.9, d.zw)), cc, vec2(0.0, 0.0));
         weights += smaa_area_diag(d.xy, cc, subsample_indices.z);
     }
     d.xz = smaa_search_diag2(texcoord, vec2(-1.0, -1.0), end);
-    if (sample_pass_0((texcoord + vec2(1.0, 0.0) * smaa_texel_size())).r > 0.0)
+    if (sample_pass_0((texcoord + vec2(1.0, 0.0) * frame_texel_size())).r > 0.0)
     {
         d.yw = smaa_search_diag2(texcoord, vec2(1.0, 1.0), end);
         d.y += float(end.y > 0.9);
@@ -844,9 +830,9 @@ vec2 smaa_calculate_diag_weights(vec2 texcoord, vec2 e, vec4 subsample_indices)
     {
         vec4 coords = (vec4(-d.x, -d.x, d.y, d.y) * smaa_metrics().xyxy + texcoord.xyxy);
         vec4 c;
-        c.x = sample_pass_0((coords.xy + vec2(-1.0, 0.0) * smaa_texel_size())).g;
-        c.y = sample_pass_0((coords.xy + vec2(0.0, -1.0) * smaa_texel_size())).r;
-        c.zw = sample_pass_0((coords.zw + vec2(1.0, 0.0) * smaa_texel_size())).gr;
+        c.x = sample_pass_0((coords.xy + vec2(-1.0, 0.0) * frame_texel_size())).g;
+        c.y = sample_pass_0((coords.xy + vec2(0.0, -1.0) * frame_texel_size())).r;
+        c.zw = sample_pass_0((coords.zw + vec2(1.0, 0.0) * frame_texel_size())).gr;
         vec2 cc = (vec2(2.0, 2.0) * c.xz + c.yw);
         smaa_movc(bvec2(step(0.9, d.zw)), cc, vec2(0.0, 0.0));
         weights += smaa_area_diag(d.xy, cc, subsample_indices.w).gr;
@@ -943,10 +929,10 @@ void smaa_detect_horizontal_corner_pattern(inout vec2 weights, vec4 texcoord, ve
     vec2 rounding = (1.0 - corner_rounding()) * left_right;
     rounding /= left_right.x + left_right.y;
     vec2 factor = vec2(1.0, 1.0);
-    factor.x -= rounding.x * sample_pass_0((texcoord.xy + vec2(0.0, 1.0) * smaa_texel_size())).r;
-    factor.x -= rounding.y * sample_pass_0((texcoord.zw + vec2(1.0, 1.0) * smaa_texel_size())).r;
-    factor.y -= rounding.x * sample_pass_0((texcoord.xy + vec2(0.0, -2.0) * smaa_texel_size())).r;
-    factor.y -= rounding.y * sample_pass_0((texcoord.zw + vec2(1.0, -2.0) * smaa_texel_size())).r;
+    factor.x -= rounding.x * sample_pass_0((texcoord.xy + vec2(0.0, 1.0) * frame_texel_size())).r;
+    factor.x -= rounding.y * sample_pass_0((texcoord.zw + vec2(1.0, 1.0) * frame_texel_size())).r;
+    factor.y -= rounding.x * sample_pass_0((texcoord.xy + vec2(0.0, -2.0) * frame_texel_size())).r;
+    factor.y -= rounding.y * sample_pass_0((texcoord.zw + vec2(1.0, -2.0) * frame_texel_size())).r;
     weights *= clamp(factor, 0.0, 1.0);
 }
 
@@ -956,10 +942,10 @@ void smaa_detect_vertical_corner_pattern(inout vec2 weights, vec4 texcoord, vec2
     vec2 rounding = (1.0 - corner_rounding()) * left_right;
     rounding /= left_right.x + left_right.y;
     vec2 factor = vec2(1.0, 1.0);
-    factor.x -= rounding.x * sample_pass_0((texcoord.xy + vec2(1.0, 0.0) * smaa_texel_size())).g;
-    factor.x -= rounding.y * sample_pass_0((texcoord.zw + vec2(1.0, 1.0) * smaa_texel_size())).g;
-    factor.y -= rounding.x * sample_pass_0((texcoord.xy + vec2(-2.0, 0.0) * smaa_texel_size())).g;
-    factor.y -= rounding.y * sample_pass_0((texcoord.zw + vec2(-2.0, 1.0) * smaa_texel_size())).g;
+    factor.x -= rounding.x * sample_pass_0((texcoord.xy + vec2(1.0, 0.0) * frame_texel_size())).g;
+    factor.x -= rounding.y * sample_pass_0((texcoord.zw + vec2(1.0, 1.0) * frame_texel_size())).g;
+    factor.y -= rounding.x * sample_pass_0((texcoord.xy + vec2(-2.0, 0.0) * frame_texel_size())).g;
+    factor.y -= rounding.y * sample_pass_0((texcoord.zw + vec2(-2.0, 1.0) * frame_texel_size())).g;
     weights *= clamp(factor, 0.0, 1.0);
 }
 
@@ -986,7 +972,7 @@ vec4 smaa_blending_weight_calculation_ps(vec2 texcoord, vec2 pixcoord, vec4 offs
             d.y = coords.z;
             d = abs(smaa_round((smaa_metrics().zz * d + -pixcoord.xx)));
             vec2 sqrt_d = sqrt(d);
-            float e2 = sample_pass_0((coords.zy + vec2(1.0, 0.0) * smaa_texel_size())).r;
+            float e2 = sample_pass_0((coords.zy + vec2(1.0, 0.0) * frame_texel_size())).r;
             weights.rg = smaa_area(sqrt_d, e1, e2, subsample_indices.y);
             coords.y = texcoord.y;
             smaa_detect_horizontal_corner_pattern(weights.rg, coords.xyzy, d);
@@ -1008,7 +994,7 @@ vec4 smaa_blending_weight_calculation_ps(vec2 texcoord, vec2 pixcoord, vec4 offs
         d.y = coords.z;
         d = abs(smaa_round((smaa_metrics().ww * d + -pixcoord.yy)));
         vec2 sqrt_d = sqrt(d);
-        float e2 = sample_pass_0((coords.xz + vec2(0.0, 1.0) * smaa_texel_size())).g;
+        float e2 = sample_pass_0((coords.xz + vec2(0.0, 1.0) * frame_texel_size())).g;
         weights.ba = smaa_area(sqrt_d, e1, e2, subsample_indices.x);
         coords.x = texcoord.x;
         smaa_detect_vertical_corner_pattern(weights.ba, coords.xyxz, d);
@@ -1020,12 +1006,12 @@ vec4 smaa_weights(vec3 input_color, vec2 position, float frame_count, float opti
                   float option_edge_threshold, float option_search_steps, float option_diagonal_steps,
                   float option_corner_rounding, float option_debug_output)
 {
-    vec2 texel = smaa_texel_size();
+    vec2 texel = frame_texel_size();
     vec4 offset[3];
     offset[0] = position.xyxy + texel.xyxy * vec4(-0.25, -0.125, 1.25, -0.125);
     offset[1] = position.xyxy + texel.xyxy * vec4(-0.125, -0.25, -0.125, 1.25);
     offset[2] = vec4(offset[0].xz, offset[1].yw) + texel.xxyy * vec4(-2.0, 2.0, -2.0, 2.0) * search_steps();
-    return smaa_blending_weight_calculation_ps(position, position * output_size(), offset, vec4(0.0));
+    return smaa_blending_weight_calculation_ps(position, position * frame_size(), offset, vec4(0.0));
 }
 
 #endif
@@ -1044,13 +1030,13 @@ vec3 smaa_encode(vec3 color)
 vec3 smaa_sample_linear(vec2 position)
 {
     // Decode before interpolation, matching the reference's sRGB color sampler on GLES2 as well.
-    vec2 pixel = position * output_size() - 0.5;
-    vec2 base = (floor(pixel) + 0.5) * smaa_texel_size();
+    vec2 pixel = position * frame_size() - 0.5;
+    vec2 base = (floor(pixel) + 0.5) * frame_texel_size();
     vec2 fraction = fract(pixel);
-    vec2 texel = smaa_texel_size();
-    vec3 top = mix(smaa_decode(smaa_sample_color(base)), smaa_decode(smaa_sample_color(base + vec2(texel.x, 0.0))), fraction.x);
+    vec2 texel = frame_texel_size();
+    vec3 top = mix(smaa_decode(sample_frame(base)), smaa_decode(sample_frame(base + vec2(texel.x, 0.0))), fraction.x);
     vec3 bottom =
-        mix(smaa_decode(smaa_sample_color(base + vec2(0.0, texel.y))), smaa_decode(smaa_sample_color(base + texel)), fraction.x);
+        mix(smaa_decode(sample_frame(base + vec2(0.0, texel.y))), smaa_decode(sample_frame(base + texel)), fraction.x);
     return mix(top, bottom, fraction.y);
 }
 
@@ -1066,7 +1052,7 @@ vec4 smaa_blend(vec3 input_color, vec2 position, float frame_count, float option
     {
         return vec4(sample_pass_1(position).rgb, 1.0);
     }
-    vec2 texel = smaa_texel_size();
+    vec2 texel = frame_texel_size();
     vec4 weights;
     weights.x = sample_pass_1(position + vec2(texel.x, 0.0)).a;
     weights.y = sample_pass_1(position + vec2(0.0, texel.y)).g;
