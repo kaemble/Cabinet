@@ -29,7 +29,7 @@ Effects follow system/game settings scope. Each dual-screen viewport filters its
 | CAS | AMD Contrast Adaptive Sharpening in linear light. Adaptation defaults to 0% and intensity to 100%. Set intensity to 0% to bypass sharpening. |
 | SMAA | Three-pass antialiasing with color or luminance edges, edge threshold, search distances, corner rounding, and debug views. Place it before CRT-Geom to antialias at source resolution. Lookup textures are embedded. |
 | CRT-Geom | Curvature, gamma, tilt, overscan, mask, scanline, and interlacing controls. Runs at output resolution, which also becomes the input resolution for subsequent effects. Interlacing applies to inputs of at least 400 lines per viewport. Zero overscan blanks the image, and negative overscan mirrors the axis. |
-| Film grain | Animated grain, centered hotspot, and occasional scratches. Hotspot and scratches default off. Set all controls to zero to preserve the input. |
+| Film grain | Gaussian grain with intensity, variance, mean, and signal-to-noise ratio controls. Defaults are 50%, 40%, 50%, and 6. Higher signal-to-noise ratios reduce grain in brighter pixels; zero disables this attenuation. Set intensity to zero to preserve the input. |
 | Chromatic aberration | Independent RGB offsets on both axes, from −1% to +1% of the viewport in 0.01% steps. |
 | Vignette | Centered falloff with strength from 0% (unchanged) to 100% (full darkening). |
 

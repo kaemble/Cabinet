@@ -149,7 +149,7 @@ class ShaderMetadataTest(unittest.TestCase):
         self.assertIn("sample_frame(vec2 position)", gl_fragment)
         self.assertIn("return 2.0 * p.source.zw;", fragment)
         self.assertIn("return 2.0 * source.zw;", gl_fragment)
-        self.assertIn('"Grain strength"', build.definition([entry for entry, _ in build.load_catalog(ROOT)]))
+        self.assertIn('"Signal-to-noise ratio"', build.definition([entry for entry, _ in build.load_catalog(ROOT)]))
 
     def test_output_resolution_and_display_units(self):
         catalog = [metadata for metadata, _ in build.load_catalog(ROOT)]

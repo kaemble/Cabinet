@@ -131,7 +131,7 @@ static void controls()
     snapshot.values.shaders.effects[0].enabled = true;
     snapshot.values.shaders.effects[0].parameters = {15, 120, 80, 150, 110, 95, 105};
     snapshot.values.shaders.effects[1].enabled = true;
-    snapshot.values.shaders.effects[1].parameters = {7, 0, 1};
+    snapshot.values.shaders.effects[1].parameters = {65, 35, 45, 8};
     snapshot.values.shaders.effects[2].enabled = false;
     snapshot.values.shaders.effects[2].parameters = {10, -10, 20, -20, 30, -30};
     snapshot.values.shaders.effects[3].enabled = true;
@@ -296,8 +296,8 @@ static void film_controls()
     require(ui.shaders.effects[1].parameters[0] == defaults[0] + 2, "Film grain value selection failed");
     ui.selected = 1;
     key(ui, SDL_SCANCODE_RIGHT);
-    require(ui.shaders.effects[1].parameters[1] == 1, "Hotspot toggle failed");
-    ui.selected = 3;
+    require(ui.shaders.effects[1].parameters[1] == defaults[1] + 1, "Variance adjustment failed");
+    ui.selected = 4;
     key(ui, SDL_SCANCODE_RETURN);
     require(ui.shaders.effects[1].parameters == defaults, "Restore defaults used the wrong effect");
     key(ui, SDL_SCANCODE_ESCAPE);
@@ -312,9 +312,9 @@ static void film_controls()
     shaders::Stack settings;
     const auto before = settings;
     for (const auto* text : {"\"film_noise\" 1 0", "\"film_noise\" 1 7 1 2",
-                             "\"film_noise\" 1 7 1 0 unexpected",
-                             "\"film_noise\" 1 7 1 0 999999999999999999999999",
-                             "\"film_noise\" 1 17 1 1", "\"unknown\" 1 0 0 0"})
+                             "\"film_noise\" 1 50 40 50 6 unexpected",
+                             "\"film_noise\" 1 50 40 50 999999999999999999999999",
+                             "\"film_noise\" 1 101 40 50 6", "\"film_noise\" 1 50 40 50 17", "\"unknown\" 1 0 0 0"})
     {
         std::istringstream invalid(text);
         settings.read(invalid);
@@ -914,7 +914,7 @@ static void film_pixels(const char* driver)
         };
         auto& film = stack.effects[1];
         film.enabled = true;
-        film.parameters.assign(3, 0);
+        film.parameters = {0, 40, 50, 6};
         auto& chromatic = stack.effects[2];
         auto& vignette_effect = stack.effects[3];
         const auto neutral = capture();
@@ -925,22 +925,35 @@ static void film_pixels(const char* driver)
                 for (int channel = 0; channel < 3; ++channel)
                 {
                     require(std::abs(neutral[(y * 64 + x) * 3 + channel] - image[(y * 128 + x) * 4 + channel]) <= 1,
-                            "Film grain with all controls zero must preserve cropped input pixels");
+                            "Zero intensity must preserve cropped input pixels");
                 }
             }
         }
-        film.parameters[0] = 16;
+        film.parameters = {50, 40, 50, 0};
         const auto grain = capture();
         const auto animated = capture();
         require(grain != neutral && grain != animated, "Film grain did not animate");
         for (std::size_t pixel = 0; pixel < grain.size(); pixel += 3)
         {
-            const int red_delta = grain[pixel] - neutral[pixel];
+            const double gain = double(grain[pixel]) / neutral[pixel];
             for (int channel = 0; channel < 3; ++channel)
             {
-                const int delta = grain[pixel + channel] - neutral[pixel + channel];
-                require(std::abs(delta) <= 22 && std::abs(delta - red_delta) <= 1,
-                        "Grain must be bounded, monochrome noise");
+                const double expected = std::clamp(neutral[pixel + channel] * gain, 0.0, 255.0);
+                require(std::abs(grain[pixel + channel] - expected) <= 4,
+                        "Grain must multiply all channels by the same factor");
+            }
+        }
+        film.parameters = {50, 0, 50, 6};
+        require(capture() == neutral, "Zero variance and neutral mean must preserve the input");
+        for (int mean : {0, 25, 75, 100})
+        {
+            film.parameters[2] = mean;
+            const auto adjusted = capture();
+            const double gain = 1.5 - mean * .01;
+            for (std::size_t pixel = 0; pixel < adjusted.size(); ++pixel)
+            {
+                require(std::abs(adjusted[pixel] - std::clamp(std::round(neutral[pixel] * gain), 0.0, 255.0)) <= 1,
+                        "Noise mean does not match the reference multiplicative blend");
             }
         }
         film.parameters[0] = 0;
@@ -999,20 +1012,15 @@ static void film_pixels(const char* driver)
         const int corner = symmetric[0];
         require(center >= 127 && edge > 0 && edge < center && corner < edge,
                 "Vignette must preserve the center and darken smoothly toward the corners");
-        require(SDL_UpdateTexture(input, nullptr, image.data(), 128 * 4), SDL_GetError());
         vignette_effect.enabled = false;
         film.enabled = true;
-        film.parameters[1] = 1;
-        const auto hotspot = capture();
-        require(std::abs(hotspot[sample] - std::round(neutral[sample] + factor * .2 * 255)) <= 2,
-                "Hotspot differs from the reference");
-        film.parameters[1] = 0;
-        film.parameters[2] = 1;
-        chain.reset();
-        const auto scratches = capture();
-        const auto clear_frame = capture();
-        require(scratches != neutral && clear_frame == neutral, "Scratches must be occasional and independently switchable");
-        film.parameters[2] = 0;
+        film.parameters = {0, 100, 50, 16};
+        const auto flat = capture();
+        film.parameters[0] = 100;
+        require(capture() == flat, "High signal-to-noise ratio must suppress grain in brighter pixels");
+        film.parameters[3] = 0;
+        require(capture() != flat, "Zero signal-to-noise ratio must disable grain attenuation");
+        require(SDL_UpdateTexture(input, nullptr, image.data(), 128 * 4), SDL_GetError());
         film.enabled = false;
         vignette_effect.enabled = true;
         stack.effects[0].enabled = true;
@@ -1098,8 +1106,12 @@ static void viewport_pixels(const char* driver)
                         settings.effects[0].enabled = settings.effects[1].enabled = mode == 2;
                         settings.effects[2].enabled = mode == 1 || mode == 2;
                         settings.effects[3].enabled = mode == 3;
-                        for (int scaling : {0, 2, 3})
+                        for (int scaling : {0, 1, 2, 3})
                         {
+                            if (scaling == 1 && (mode != 0 || format != SDL_PIXELFORMAT_RGBA32))
+                            {
+                                continue;
+                            }
                             for (unsigned screen = 0; screen < 2; ++screen)
                             {
                                 auto* target = screen ? secondary.renderer : renderer;
@@ -1120,10 +1132,25 @@ static void viewport_pixels(const char* driver)
                                 frame.shaders = &settings;
                                 const auto view = dual_screen::window_view(system, screen, output_width, output_height);
                                 const auto crop = dual_screen::pixels(view.source, width, height);
-                                const auto destination = GamePresentation::screen_viewport(frame, view);
+                                auto destination = GamePresentation::screen_viewport(frame, view);
+                                if (mode == 0 && scaling == 2 && format == SDL_PIXELFORMAT_RGBA32)
+                                {
+                                    destination = {0, 0, crop.w * 1.5f, crop.h * 1.5f};
+                                }
                                 presentations[screen].draw(target, frame, destination, &crop);
                                 auto* surface = SDL_RenderReadPixels(target, nullptr);
                                 require(surface, SDL_GetError());
+                                if (mode == 0 && format == SDL_PIXELFORMAT_RGBA32)
+                                {
+                                    for (int row : {0, static_cast<int>(destination.h) - 1})
+                                    {
+                                        Uint8 r, g, b, a;
+                                        require(SDL_ReadSurfacePixel(surface, int(destination.x + destination.w / 2),
+                                                                     int(destination.y) + row, &r, &g, &b, &a), SDL_GetError());
+                                        const int expected = 60 + (row ? static_cast<int>(crop.h) - 1 : 0);
+                                        require(g == expected, "Scaling mixed another screen into the viewport edge");
+                                    }
+                                }
                                 for (float position : {.125f, .375f, .5f, .625f, .875f})
                                 {
                                     const int x = static_cast<int>(destination.x + position * destination.w);
